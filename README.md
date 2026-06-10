@@ -12,7 +12,7 @@
   adb install app-release.apk
 4. 기본 런처 막기
   adb shell pm disable com.innioasis.y1
-
+5. 재부팅
 
 adb tool
 https://dl.google.com/android/repository/platform-tools-latest-windows.zip?hl=ko
