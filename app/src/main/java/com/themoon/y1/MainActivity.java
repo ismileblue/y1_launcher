@@ -70,7 +70,8 @@ public class MainActivity extends Activity {
     private static final int BROWSER_ARTISTS = 2;
     private static final int BROWSER_ALBUMS = 3;
     private static final int BROWSER_VIRTUAL_SONGS = 4;
-
+    // 💡 [추가] 손상되어 앱을 터뜨린 '독약 파일'들을 기억하는 블랙리스트
+    private java.util.Set<String> blacklist = new java.util.HashSet<>();
     private int currentBrowserMode = BROWSER_ROOT;
     private String virtualQueryType = "";
     private String virtualQueryValue = "";
@@ -309,6 +310,18 @@ public class MainActivity extends Activity {
 
         try {
             prefs = getSharedPreferences("Y1_SETTINGS", MODE_PRIVATE);
+            // 🚀 1. 저장된 블랙리스트를 불러옵니다.
+            blacklist = prefs.getStringSet("blacklist", new java.util.HashSet<String>());
+
+            // 🚀 2. [데스노트 검사] 앱이 지난번에 이 파일을 읽다가 죽었는지 확인!
+            String poisonFile = prefs.getString("last_attempted_file", null);
+            if (poisonFile != null) {
+                // 이 파일이 범인입니다! 블랙리스트에 추가하고 노트를 지웁니다.
+                blacklist.add(poisonFile);
+                prefs.edit().putStringSet("blacklist", blacklist).remove("last_attempted_file").apply();
+                Toast.makeText(this, "⚠️ Corrupted file blocked: " + new File(poisonFile).getName(), Toast.LENGTH_LONG).show();
+            }
+
             isShuffleMode = prefs.getBoolean("shuffle", false);
             isRepeatMode = prefs.getBoolean("repeat", false);
             isSoundEffectEnabled = prefs.getBoolean("sound", true);
@@ -1365,6 +1378,8 @@ public class MainActivity extends Activity {
                 if (f.isDirectory()) {
                     buildCustomLibrary(f); // 폴더면 끝까지 파고듭니다.
                 } else if (isAudioFile(f)) {
+
+                    if (blacklist.contains(f.getAbsolutePath())) continue;
                     try {
                         MediaMetadataRetriever mmr = new MediaMetadataRetriever();
                         java.io.FileInputStream fis = new java.io.FileInputStream(f);
@@ -1636,7 +1651,19 @@ public class MainActivity extends Activity {
     private void prepareMusicTrack(int index) {
         if (currentPlaylist.isEmpty()) return;
         final File track = currentPlaylist.get(index);
+// 🚀 [추가된 부분] 손상된 파일 방어막: 파일이 없거나 용량이 1KB(1024 bytes) 미만인 껍데기 파일일 경우
+        if (!track.exists() || track.length() < 1024) {
+            tvPlayerTitle.setText("Corrupted File");
+            tvPlayerArtist.setText("Skipping...");
+            ivAlbumArt.setImageResource(R.drawable.default_album);
 
+            // 시스템이 뻗기 전에 경고창을 띄우고 1.5초 뒤에 다음 곡으로 자동으로 부드럽게 넘겨버립니다!
+            Toast.makeText(this, "Corrupted file detected. Skipping...", Toast.LENGTH_SHORT).show();
+            new Handler().postDelayed(new Runnable() {
+                @Override public void run() { nextTrack(); }
+            }, 1500);
+            return;
+        }
         tvPlayerTitle.setText(track.getName());
         tvPlayerArtist.setText("Loading...");
         ivAlbumArt.setImageResource(R.drawable.default_album);
@@ -2026,7 +2053,7 @@ public class MainActivity extends Activity {
             return original;
         }
     }
-    // 💡 1. 날짜/시간 설정 메인 화면
+    // 💡 1. 날짜/시간 설정 메인 화면 (시간 오류 및 포커스 락 버그 완벽 수정 버전)
     private void buildDateTimeUI() {
         containerSettingsItems.removeAllViews();
         createCategoryHeader("━ SET DATE & TIME ━");
@@ -2060,17 +2087,19 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) {
                 clickFeedback();
                 try {
+                    // 🚀 [시간 버그 해결] 인터넷 자동 시간 동기화를 완전히 차단하고 GMT 표준시로 고정합니다.
+                    String cmd = "settings put global auto_time 0; " +
+                            "settings put system auto_time 0; " +
+                            "setprop persist.sys.timezone GMT; " +
+                            "export TZ=GMT; ";
 
-                    // 💡 1. 기기의 타임존을 'GMT (시차 0)'으로 강제 고정시킵니다!
-                    Runtime.getRuntime().exec(new String[]{"su", "-c", "setprop persist.sys.timezone GMT"});
-
-                    // 💡 2. 기기 시스템 시간 강제 변경
                     String dateTimeStandard = String.format(java.util.Locale.US, "%04d%02d%02d.%02d%02d%02d", dtYear, dtMonth, dtDay, dtHour, dtMinute, 0);
-                    Runtime.getRuntime().exec(new String[]{"su", "-c", "date -s " + dateTimeStandard});
                     String dateTimeToolbox = String.format(java.util.Locale.US, "%02d%02d%02d%02d%04d.00", dtMonth, dtDay, dtHour, dtMinute, dtYear);
-                    Runtime.getRuntime().exec(new String[]{"su", "-c", "date " + dateTimeToolbox});
 
-                    // 변경된 시간을 시스템 UI에 즉시 반영하라는 브로드캐스트 발송
+                    // 모든 명령어를 하나의 흐름으로 묶어 시스템 리눅스 단에 다이렉트로 주입합니다.
+                    Runtime.getRuntime().exec(new String[]{"su", "-c", cmd + "date -s " + dateTimeStandard + "; date " + dateTimeToolbox});
+
+                    // 시스템 전역에 시간이 변경되었음을 강제로 방송하여 인지시킵니다.
                     sendBroadcast(new Intent(Intent.ACTION_TIME_CHANGED));
 
                     Toast.makeText(MainActivity.this, "Time applied successfully!", Toast.LENGTH_SHORT).show();
@@ -2078,18 +2107,19 @@ public class MainActivity extends Activity {
                     Toast.makeText(MainActivity.this, "Failed: Root access required.", Toast.LENGTH_SHORT).show();
                 }
 
-                buildSettingsUI(); // 완료 후 설정 메인으로 돌아가기
+                // 🚀 [포커스 버그 해결 1] 오염된 인덱스를 'Date & Time Settings' 메뉴 위치(14번째 항목)로 강제 정화
+                lastSettingsFocusIndex = 14;
+                buildSettingsUI();
 
-                // 🚀 [핵심 버그 수정] 화면이 다시 그려질 때까지 아주 잠깐(10ms) 기다렸다가 포커스를 강제로 잡아줍니다!
-                containerSettingsItems.post(new Runnable() {
+                // 🚀 [포커스 버그 해결 2] 50ms의 미세한 안전 딜레이를 주어 UI 가 완벽히 배치된 후 포커스를 확실히 꽂아줍니다.
+                containerSettingsItems.postDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        if (containerSettingsItems.getChildCount() > 0) {
-                            // 설정 메뉴의 마지막 항목(Date & Time)으로 포커스 이동
+                        if (containerSettingsItems != null && containerSettingsItems.getChildCount() > 0) {
                             containerSettingsItems.getChildAt(containerSettingsItems.getChildCount() - 1).requestFocus();
                         }
                     }
-                });
+                }, 50);
             }
         });
         containerSettingsItems.addView(btnApply);
@@ -2097,13 +2127,25 @@ public class MainActivity extends Activity {
         final Button btnCancel = createListButton("❌ CANCEL (BACK)");
         btnCancel.setTextColor(0xFF888888);
         btnCancel.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { clickFeedback(); buildSettingsUI(); }
+            @Override public void onClick(View v) {
+                clickFeedback();
+
+                // 취소하고 나갈 때도 인덱스를 안전하게 복구하고 포커스를 인위적으로 매핑합니다.
+                lastSettingsFocusIndex = 14;
+                buildSettingsUI();
+                containerSettingsItems.postDelayed(new Runnable() {
+                    @Override public void run() {
+                        if (containerSettingsItems != null && containerSettingsItems.getChildCount() > 0) {
+                            containerSettingsItems.getChildAt(containerSettingsItems.getChildCount() - 1).requestFocus();
+                        }
+                    }
+                }, 50);
+            }
         });
         containerSettingsItems.addView(btnCancel);
 
         if (containerSettingsItems.getChildCount() > 1) containerSettingsItems.getChildAt(1).requestFocus();
     }
-
     // 💡 2. 숫자(년/월/일/시/분) 선택용 세로 리스트 화면
     private void buildDateTimeSelectorUI(final String type, int min, int max, int currentValue) {
         containerSettingsItems.removeAllViews();
