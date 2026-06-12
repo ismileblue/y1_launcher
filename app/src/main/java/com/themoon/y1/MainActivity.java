@@ -94,7 +94,8 @@ public class MainActivity extends Activity {
             album = al;
         }
     }
-
+    private boolean isScreenOffControlEnabled = false;
+    private boolean isAutoFetchEnabled = true; // 🚀 [추가] 인터넷 자동 검색 스위치 기본값
     private List<SongItem> customLibrary = new ArrayList<>();
     private boolean isCustomScanning = false;
     private int currentScreenState = STATE_MENU;
@@ -161,7 +162,6 @@ public class MainActivity extends Activity {
     private boolean isVibrationEnabled = true;
     private boolean isPickingBackground = false;
 
-    private boolean isScreenOffControlEnabled = false;
     // 💡 마지막으로 재생된 앨범 아트를 기억하는 변수
     private byte[] lastAlbumArtBytes = null;
     // 💡 이퀄라이저 관련 변수 추가
@@ -446,6 +446,8 @@ public class MainActivity extends Activity {
 
         try { isVibrationEnabled = prefs.getBoolean("vibrate", true); } catch (Exception e) {}
         try { isScreenOffControlEnabled = prefs.getBoolean("screen_off_control", false); } catch (Exception e) {}
+
+        try { isAutoFetchEnabled = prefs.getBoolean("auto_fetch", true); } catch (Exception e) {} // 🚀 [추가]
         try { currentTimeoutIndex = prefs.getInt("timeout_idx", 1); } catch (Exception e) {}
 
         try {
@@ -1880,6 +1882,22 @@ public class MainActivity extends Activity {
             }
         });
         containerSettingsItems.addView(btnWifiMenu);
+// 🚀 [추가 1] 인터넷에서 앨범 아트 및 곡 정보 자동 검색 켜기/끄기
+        final LinearLayout btnAutoFetch = createSettingRow("Auto Fetch Album Art", isAutoFetchEnabled ? "ON" : "OFF");
+        btnAutoFetch.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                isAutoFetchEnabled = !isAutoFetchEnabled;
+                ((TextView) btnAutoFetch.getChildAt(1)).setText(isAutoFetchEnabled ? "ON" : "OFF");
+                try {
+                    prefs.edit().putBoolean("auto_fetch", isAutoFetchEnabled).commit();
+                } catch (Exception e) {}
+            }
+        });
+        containerSettingsItems.addView(btnAutoFetch);
+
+
 
         LinearLayout btnBtMenu = createSettingRow("Bluetooth Setup", "〉 ");
         btnBtMenu.setOnClickListener(new View.OnClickListener() {
@@ -1923,7 +1941,46 @@ public class MainActivity extends Activity {
             }
         });
         containerSettingsItems.addView(btnBg);
+// 🚀 [추가 2] 기기에 쌓인 앨범 아트 캐시 파일들 한 번에 지우기 (용량 확보)
+        LinearLayout btnClearCache = createSettingRow("Clear Album Art Cache", "〉 ");
+        btnClearCache.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Clear Cache")
+                        .setMessage("Delete all downloaded album covers to free up storage space?")
+                        .setPositiveButton("Clear", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface dialog, int which) {
+                                try {
+                                    File coverFolder = new File("/storage/sdcard0/Y1_Covers");
+                                    int count = 0;
+                                    if (coverFolder.exists()) {
+                                        File[] files = coverFolder.listFiles();
+                                        if (files != null) {
+                                            for (File f : files) {
+                                                if (f.isFile() && f.delete()) count++;
+                                            }
+                                        }
+                                    }
+                                    Toast.makeText(MainActivity.this, "Deleted " + count + " cover images.", Toast.LENGTH_SHORT).show();
 
+                                    // 메인 화면에 남아있는 이미지를 기본 아이콘으로 초기화합니다.
+                                    ivAlbumArt.setImageResource(R.drawable.default_album);
+                                    ivPlayerBgBlur.setImageResource(0);
+                                    lastAlbumArtBytes = null;
+                                    updateMainMenuBackground();
+                                    refreshNowPlayingPreview();
+                                } catch (Exception e) {
+                                    Toast.makeText(MainActivity.this, "Failed to clear cache.", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            }
+        });
+        containerSettingsItems.addView(btnClearCache);
         LinearLayout btnTime = createSettingRow("Date & Time Settings", "〉");
         btnTime.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -2372,40 +2429,74 @@ public class MainActivity extends Activity {
             java.io.FileInputStream fisMmr = new java.io.FileInputStream(track);
             mmr.setDataSource(fisMmr.getFD());
 
+
+            // 1. 파일에서 메타데이터(태그) 추출
             String t = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
             String a = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
-            if (t != null && !t.isEmpty())
-                tvPlayerTitle.setText(t);
-            if (a != null && !a.isEmpty())
-                tvPlayerArtist.setText(a);
-            else
-                tvPlayerArtist.setText("Unknown Artist");
-
             lastAlbumArtBytes = mmr.getEmbeddedPicture();
-            updateMainMenuBackground();
-            refreshNowPlayingPreview();
+
+            String safeFileName = track.getName().replace(".mp3", "").replace(".flac", "").replace(".wav", "").replace(".m4a", "");
+            File coverFile = new File("/storage/sdcard0/Y1_Covers", safeFileName + ".jpg");
+
+            if (prefs.contains("meta_title_" + track.getAbsolutePath())) {
+                t = prefs.getString("meta_title_" + track.getAbsolutePath(), t);
+                a = prefs.getString("meta_artist_" + track.getAbsolutePath(), a);
+            }
+
+            // 🚀 [핵심 판단 로직] 이 파일에 정말 멀쩡한 태그(가수+제목)가 들어있는지 검사합니다.
+            boolean hasValidTags = (t != null && !t.trim().isEmpty() && a != null && !a.trim().isEmpty() && !a.equalsIgnoreCase("Unknown Artist"));
+
+            // 제목 화면에 표시
+            if (t != null && !t.trim().isEmpty()) tvPlayerTitle.setText(t);
+            else tvPlayerTitle.setText(safeFileName);
+
+            // 가수 화면에 표시
+            if (a != null && !a.trim().isEmpty()) tvPlayerArtist.setText(a);
+            else tvPlayerArtist.setText("Unknown Artist");
+
+            // 2. 앨범 아트 세팅 및 인터넷 검색
             if (lastAlbumArtBytes != null) {
+                // 원본 파일에 앨범 아트가 있으면 그대로 사용
+                updateMainMenuBackground();
+                refreshNowPlayingPreview();
                 try {
-                    // 중앙의 선명한 앨범 아트
-                    BitmapFactory.Options optsCenter = new BitmapFactory.Options();
+                    android.graphics.BitmapFactory.Options optsCenter = new android.graphics.BitmapFactory.Options();
                     optsCenter.inSampleSize = 2;
-                    Bitmap bmpCenter = BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length,
-                            optsCenter);
+                    android.graphics.Bitmap bmpCenter = android.graphics.BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length, optsCenter);
                     ivAlbumArt.setImageBitmap(bmpCenter);
 
-                    // 🚀 플레이어 뒷배경도 고급 블러 처리!
-                    BitmapFactory.Options optsBg = new BitmapFactory.Options();
+                    android.graphics.BitmapFactory.Options optsBg = new android.graphics.BitmapFactory.Options();
                     optsBg.inSampleSize = 4;
-                    Bitmap sourceBg = BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length,
-                            optsBg);
-                    Bitmap blurredBg = applyGaussianBlur(sourceBg);
+                    android.graphics.Bitmap sourceBg = android.graphics.BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length, optsBg);
+                    android.graphics.Bitmap blurredBg = applyGaussianBlur(sourceBg);
                     ivPlayerBgBlur.setImageBitmap(blurredBg);
+                    if (sourceBg != blurredBg) sourceBg.recycle();
+                } catch (Throwable e) {}
 
-                    if (sourceBg != blurredBg)
-                        sourceBg.recycle(); // 메모리 정리
-                } catch (Throwable e) {
+            } else if (coverFile.exists()) {
+                // 다운받아둔 앨범 아트가 있으면 사용
+                applyCachedCoverArt(coverFile.getAbsolutePath());
+
+            } else {
+                // 없으면 인터넷에서 검색 출동!
+                if (isAutoFetchEnabled) {
+                    android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wm != null && wm.isWifiEnabled() && wm.getConnectionInfo().getNetworkId() != -1) {
+
+                        String searchQuery = "";
+                        // 🚀 [스마트 쿼리 생성] 멀쩡한 태그가 있다면 그걸 합쳐서(가수+제목) 무조건 100% 일치하는 곡을 찾습니다!
+                        if (hasValidTags) {
+                            searchQuery = a + " " + t;
+                        } else {
+                            searchQuery = safeFileName.replace("-", " ").replace("_", " ");
+                        }
+
+                        // 태그가 있다는 사실과 기존 태그 내용을 같이 넘겨서, 정보가 덮어씌워지지 않게 막습니다.
+                        fetchTrackInfoFromInternet(track, searchQuery, hasValidTags, t, a);
+                    }
                 }
             }
+
             fisMmr.close();
             mmr.release();
         } catch (Throwable t) {
@@ -3312,4 +3403,175 @@ public class MainActivity extends Activity {
             }
         }
     }
+    // 💡 [추가] 1. 인터넷에서 받아온 커버 이미지를 캐시 폴더에서 불러와 화면에 띄우는 함수
+    private void applyCachedCoverArt(String imagePath) {
+        try {
+            // 중앙의 선명한 앨범 아트
+            android.graphics.BitmapFactory.Options optsCenter = new android.graphics.BitmapFactory.Options();
+            optsCenter.inSampleSize = 2;
+            android.graphics.Bitmap bmpCenter = android.graphics.BitmapFactory.decodeFile(imagePath, optsCenter);
+            ivAlbumArt.setImageBitmap(bmpCenter);
+
+            // 뒷배경 블러 처리
+            android.graphics.BitmapFactory.Options optsBg = new android.graphics.BitmapFactory.Options();
+            optsBg.inSampleSize = 4;
+            android.graphics.Bitmap sourceBg = android.graphics.BitmapFactory.decodeFile(imagePath, optsBg);
+            android.graphics.Bitmap blurredBg = applyGaussianBlur(sourceBg);
+            ivPlayerBgBlur.setImageBitmap(blurredBg);
+            if (sourceBg != blurredBg) sourceBg.recycle();
+
+            // 메인 메뉴 배경도 연동하기 위해 파일 데이터를 byte[]로 변환해서 lastAlbumArtBytes에 집어넣습니다!
+            java.io.File file = new java.io.File(imagePath);
+            int size = (int) file.length();
+            byte[] bytes = new byte[size];
+            java.io.BufferedInputStream buf = new java.io.BufferedInputStream(new java.io.FileInputStream(file));
+            buf.read(bytes, 0, bytes.length);
+            buf.close();
+
+            lastAlbumArtBytes = bytes;
+            updateMainMenuBackground();
+            refreshNowPlayingPreview();
+
+        } catch (Exception e) {}
+    }
+
+    // 💡 [수정] 정밀 검색 및 기존 태그(가수/제목) 보호 기능이 추가된 Deezer 스크래핑 엔진
+    private void fetchTrackInfoFromInternet(final File track, final String originalQuery, final boolean hasValidTags, final String origTitle, final String origArtist) {
+        // 찌꺼기 텍스트 청소기
+        final String cleanQuery = originalQuery
+                .replaceAll("\\[.*?\\]", "")
+                .replaceAll("\\(.*?\\)", "")
+                .replaceAll("(?i)구글검색|짱토렌트|320kbps|official|다운|음원", "")
+                .replaceAll("^[0-9\\s\\-]+", "")
+                .replaceAll("\\s[0-9]{2}\\s", " ")
+                .trim();
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(MainActivity.this, "🔍 Searching: " + cleanQuery, Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String query = java.net.URLEncoder.encode(cleanQuery, "UTF-8");
+                    String urlString = "http://api.deezer.com/search?q=" + query;
+                    java.net.URL url = new java.net.URL(urlString);
+
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(10000);
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode != 200) throw new Exception("HTTP Response Code: " + responseCode);
+
+                    java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
+                    org.json.JSONArray dataArray = jsonResponse.optJSONArray("data");
+
+                    if (dataArray != null && dataArray.length() > 0) {
+                        org.json.JSONObject trackInfo = dataArray.getJSONObject(0);
+
+                        // 서버에서 가져온 가수와 제목
+                        final String fetchedTitle = trackInfo.getString("title");
+                        final String fetchedArtist = trackInfo.getJSONObject("artist").getString("name");
+
+                        // 🚀 [태그 보호 장치] 파일에 원래 완벽한 태그가 있었다면 서버 정보를 무시하고 기존 것을 유지합니다!
+                        final String finalTitle = hasValidTags ? origTitle : fetchedTitle;
+                        final String finalArtist = hasValidTags ? origArtist : fetchedArtist;
+
+                        String coverUrl = trackInfo.getJSONObject("album").getString("cover_xl").replace("https://", "http://");
+                        java.net.URL imgUrl = new java.net.URL(coverUrl);
+                        java.net.HttpURLConnection imgConn = (java.net.HttpURLConnection) imgUrl.openConnection();
+                        java.io.InputStream in = imgConn.getInputStream();
+                        final android.graphics.Bitmap coverBitmap = android.graphics.BitmapFactory.decodeStream(in);
+                        in.close();
+
+                        File coverFolder = new File("/storage/sdcard0/Y1_Covers");
+                        if (!coverFolder.exists()) coverFolder.mkdirs();
+                        String safeFileName = track.getName().replace(".mp3", "").replace(".flac", "");
+                        final File coverFile = new File(coverFolder, safeFileName + ".jpg");
+                        java.io.FileOutputStream fos = new java.io.FileOutputStream(coverFile);
+                        coverBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, fos);
+                        fos.close();
+
+                        // 원래 태그가 없었을 때만! 우리가 찾아온 정보를 영구 저장소에 기록합니다.
+                        if (!hasValidTags) {
+                            prefs.edit()
+                                    .putString("meta_title_" + track.getAbsolutePath(), finalTitle)
+                                    .putString("meta_artist_" + track.getAbsolutePath(), finalArtist)
+                                    .commit();
+                        }
+
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(MainActivity.this, "✅ Album Art Updated!", Toast.LENGTH_SHORT).show();
+                                if (currentPlaylist.get(currentIndex).getAbsolutePath().equals(track.getAbsolutePath())) {
+                                    // 기존 태그가 없었을 때만 화면의 글씨를 바꿔줍니다. (있었다면 이미 정상 출력 중이므로 이미지 갈아끼우기만 실행)
+                                    if (!hasValidTags) {
+                                        tvPlayerTitle.setText(finalTitle);
+                                        tvPlayerArtist.setText(finalArtist);
+                                    }
+                                    applyCachedCoverArt(coverFile.getAbsolutePath());
+                                }
+                            }
+                        });
+                    } else {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(MainActivity.this, "❌ No results found.", Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "⚠️ Connection Error", Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+    // 💡 [추가] 구형 안드로이드의 잠든 최신 보안(TLS 1.2)을 강제로 깨우는 전용 소켓 팩토리
+    private static class TLSSocketFactory extends javax.net.ssl.SSLSocketFactory {
+        private javax.net.ssl.SSLSocketFactory internalSSLSocketFactory;
+
+        public TLSSocketFactory() throws java.security.KeyManagementException, java.security.NoSuchAlgorithmException {
+            javax.net.ssl.SSLContext context = javax.net.ssl.SSLContext.getInstance("TLS");
+            context.init(null, null, null);
+            internalSSLSocketFactory = context.getSocketFactory();
+        }
+
+        @Override public String[] getDefaultCipherSuites() { return internalSSLSocketFactory.getDefaultCipherSuites(); }
+        @Override public String[] getSupportedCipherSuites() { return internalSSLSocketFactory.getSupportedCipherSuites(); }
+        @Override public java.net.Socket createSocket() throws java.io.IOException { return enableTLSOnSocket(internalSSLSocketFactory.createSocket()); }
+        @Override public java.net.Socket createSocket(java.net.Socket s, String host, int port, boolean autoClose) throws java.io.IOException { return enableTLSOnSocket(internalSSLSocketFactory.createSocket(s, host, port, autoClose)); }
+        @Override public java.net.Socket createSocket(String host, int port) throws java.io.IOException, java.net.UnknownHostException { return enableTLSOnSocket(internalSSLSocketFactory.createSocket(host, port)); }
+        @Override public java.net.Socket createSocket(String host, int port, java.net.InetAddress localHost, int localPort) throws java.io.IOException, java.net.UnknownHostException { return enableTLSOnSocket(internalSSLSocketFactory.createSocket(host, port, localHost, localPort)); }
+        @Override public java.net.Socket createSocket(java.net.InetAddress host, int port) throws java.io.IOException { return enableTLSOnSocket(internalSSLSocketFactory.createSocket(host, port)); }
+        @Override public java.net.Socket createSocket(java.net.InetAddress address, int port, java.net.InetAddress localAddress, int localPort) throws java.io.IOException { return enableTLSOnSocket(internalSSLSocketFactory.createSocket(address, port, localAddress, localPort)); }
+
+        // 🚀 가장 핵심! 열리는 모든 소켓의 설정값을 TLSv1.2 로 강제 고정합니다.
+        private java.net.Socket enableTLSOnSocket(java.net.Socket socket) {
+            if (socket instanceof javax.net.ssl.SSLSocket) {
+                ((javax.net.ssl.SSLSocket) socket).setEnabledProtocols(new String[] {"TLSv1.1", "TLSv1.2"});
+            }
+            return socket;
+        }
+    }
+
 }
