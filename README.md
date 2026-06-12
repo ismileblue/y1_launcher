@@ -10,7 +10,7 @@
 <img width="473" height="358" alt="스크린샷 2026-06-10 233009" src="https://github.com/user-attachments/assets/976ca048-4755-49cb-b4d2-913c76f84694" />
 
 현재 만들고 있는 런처입니다
-MO-ON Launcher
+JJ Launcher
 
 주요기능
 
