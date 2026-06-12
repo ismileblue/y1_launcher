@@ -9,9 +9,11 @@
 <img width="475" height="353" alt="스크린샷 2026-06-10 233120" src="https://github.com/user-attachments/assets/fe30d13f-308d-465b-a2e7-435ed61a6421" />
 <img width="473" height="358" alt="스크린샷 2026-06-10 233009" src="https://github.com/user-attachments/assets/976ca048-4755-49cb-b4d2-913c76f84694" />
 
-현재 만들고 있는 런처입니다 MO-ON Launcher
+현재 만들고 있는 런처입니다
+MO-ON Launcher
 
 주요기능
+
 1.자체 미디어 스캐너로 빠른 음악 라이브러리 자동 분류 가능
 
 2.셔플, 반복 재생 및 기기 내장 이퀄라이저(EQ) 프리셋 설정 가능
