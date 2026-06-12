@@ -2383,7 +2383,7 @@ public class MainActivity extends Activity {
 
             lastAlbumArtBytes = mmr.getEmbeddedPicture();
             updateMainMenuBackground();
-
+            refreshNowPlayingPreview();
             if (lastAlbumArtBytes != null) {
                 try {
                     // 중앙의 선명한 앨범 아트
@@ -2736,15 +2736,17 @@ public class MainActivity extends Activity {
             return true;
         }
 
+        // 🚀 [수정] 플레이어 화면(STATE_PLAYER) 제한을 완전히 삭제했습니다!
+        // 이제 메인 화면, 브라우저, 설정 창 등 어느 화면에 있든 버튼(87, 88)을 누르면 즉시 곡이 넘어갑니다.
         if (keyCode == KeyEvent.KEYCODE_MEDIA_NEXT || keyCode == 87) {
-            if (event.getRepeatCount() == 0 && currentScreenState == STATE_PLAYER) {
+            if (event.getRepeatCount() == 0) {
                 clickFeedback();
                 nextTrack();
             }
             return true;
         }
         if (keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS || keyCode == 88) {
-            if (event.getRepeatCount() == 0 && currentScreenState == STATE_PLAYER) {
+            if (event.getRepeatCount() == 0) {
                 clickFeedback();
                 prevTrack();
             }
@@ -2894,18 +2896,7 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
-            if (currentScreenState == STATE_MENU) {
-                if (keyCode == 21) {
-                    clickFeedback();
-                    prevTrack();
-                    return true;
-                }
-                if (keyCode == 22) {
-                    clickFeedback();
-                    nextTrack();
-                    return true;
-                }
-            }
+
             View c = getCurrentFocus();
             if (c != null) {
                 if (keyCode == 21) {
@@ -3292,5 +3283,33 @@ public class MainActivity extends Activity {
             }
         }
     }
+    // 💡 [추가] 곡이 바뀌었을 때 메인 화면의 'Now Playing' 미리보기(앨범아트/제목)를 즉시 새로고침하는 함수
+    private void refreshNowPlayingPreview() {
+        // 메인 메뉴 화면에 있고, 포커스가 Now Playing 버튼에 맞춰져 있을 때만 작동합니다.
+        if (currentScreenState == STATE_MENU && btnNowPlaying != null && btnNowPlaying.hasFocus()) {
+            if (lastAlbumArtBytes != null && lastAlbumArtBytes.length > 0) {
+                try {
+                    android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                    opts.inSampleSize = 2;
+                    android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length, opts);
+                    ivMenuPreview.setImageBitmap(bmp);
+                } catch (Exception e) {
+                    ivMenuPreview.setImageResource(R.drawable.music_circle);
+                }
 
+                if (tvMenuPreviewTitle != null && tvMenuPreviewArtist != null) {
+                    tvMenuPreviewTitle.setVisibility(View.VISIBLE);
+                    tvMenuPreviewArtist.setVisibility(View.VISIBLE);
+                    tvMenuPreviewTitle.setText(tvPlayerTitle.getText());
+                    tvMenuPreviewArtist.setText(tvPlayerArtist.getText());
+                }
+            } else {
+                ivMenuPreview.setImageResource(R.drawable.music_circle);
+                if (tvMenuPreviewTitle != null && tvMenuPreviewArtist != null) {
+                    tvMenuPreviewTitle.setVisibility(View.GONE);
+                    tvMenuPreviewArtist.setVisibility(View.GONE);
+                }
+            }
+        }
+    }
 }
