@@ -642,16 +642,13 @@ public class MainActivity extends Activity {
         ivPlayerRepeatStatus = findViewById(R.id.iv_player_repeat_status);
         updatePlayerStatusIndicators();
 
-        // 💡 R.drawable.뒤에 방금 추가한 파일의 이름을 적어줍니다.
-        setupMenuButton(btnNowPlaying, R.drawable.music_circle);
-        setupMenuButton(btnPlay, R.drawable.music_list);
-        setupMenuButton(btnBluetooth, R.drawable.bluetooth_circle);
-        setupMenuButton(btnSettings, R.drawable.setting_circle);
-        setupMenuButton(btnRadio, R.drawable.radio_circle);
-        // [아이콘 세팅 부분에 추가]
-        // (안드로이드 기본 공유 아이콘을 넣었습니다. 나중에 R.drawable.icon_server 처럼 직접 만든 아이콘으로 변경하실 수
-        // 있습니다!)
-        setupMenuButton(btnWebServer, R.drawable.file_sync);
+        // 🚀 [수정] 아이콘 파일명(.png)을 매개변수로 던져줍니다.
+        setupMenuButton(btnNowPlaying, R.drawable.music_circle, "icon_now_playing.png");
+        setupMenuButton(btnPlay, R.drawable.music_list, "icon_music.png");
+        setupMenuButton(btnBluetooth, R.drawable.bluetooth_circle, "icon_bluetooth.png");
+        setupMenuButton(btnSettings, R.drawable.setting_circle, "icon_setting.png");
+        setupMenuButton(btnRadio, R.drawable.radio_circle, "icon_radio.png");
+        setupMenuButton(btnWebServer, R.drawable.file_sync, "icon_server.png");
 
         // [클릭 리스너 부분에 추가]
         btnWebServer.setOnClickListener(new View.OnClickListener() {
@@ -997,67 +994,80 @@ public class MainActivity extends Activity {
     }
 
     // 💡 메인 화면 배경 자동 업데이트 (고화질 가우시안 블러 적용)
-    // 💡 메인 화면 배경 자동 업데이트 (고화질 가우시안 블러 적용)
+    // 💡 [수정] 메인 화면 배경 자동 업데이트 (커스텀 배경 우선 & 블러 제거)
     private void updateMainMenuBackground() {
         try {
-            Bitmap sourceBitmap = null;
+            String savedBgPath = prefs.getString("bg_path", null);
 
-            if (lastAlbumArtBytes != null && lastAlbumArtBytes.length > 0) {
-                // 1. 앨범 아트 로드
-                BitmapFactory.Options opts = new BitmapFactory.Options();
-                opts.inSampleSize = 4;
-                sourceBitmap = BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length, opts);
-            } else {
-                // 2. 사용자 배경 이미지 로드
-                String savedBgPath = prefs.getString("bg_path", null);
-                if (savedBgPath != null && !savedBgPath.isEmpty()) {
+            // 🚀 1. 사용자가 직접 지정한 커스텀 배경이 있는지 가장 먼저 확인합니다!
+            if (savedBgPath != null && !savedBgPath.isEmpty()) {
+                File bgFile = new File(savedBgPath);
+                if (bgFile.exists()) {
                     BitmapFactory.Options opts = new BitmapFactory.Options();
                     opts.inJustDecodeBounds = true;
                     BitmapFactory.decodeFile(savedBgPath, opts);
 
+                    // 블러를 안 먹일 것이므로, 화질이 깨지지 않게 해상도를 넉넉하게(800) 잡아줍니다.
                     int scale = 1;
                     int maxDim = Math.max(opts.outWidth, opts.outHeight);
-                    while (maxDim / scale > 400) {
+                    while (maxDim / scale > 800) {
                         scale *= 2;
                     }
 
                     opts.inJustDecodeBounds = false;
                     opts.inSampleSize = scale;
-                    sourceBitmap = BitmapFactory.decodeFile(savedBgPath, opts);
-                } else {
-                    // 🚀 3. [추가된 부분] 앨범 아트도 없고 지정한 배경도 없을 때 (최초 실행 시)
-                    // 아이콘 폴더(drawable)에 있는 default_back 이미지를 불러옵니다!
-                    BitmapFactory.Options opts = new BitmapFactory.Options();
-                    opts.inSampleSize = 2; // 메모리 절약을 위해 화질을 살짝만 조절
-                    sourceBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.default_back, opts);
+                    Bitmap customBg = BitmapFactory.decodeFile(savedBgPath, opts);
+
+                    // 🚀 커스텀 배경은 블러 처리 없이 쨍한 원본 그대로 띄웁니다!
+                    ivMainBg.setImageBitmap(customBg);
+
+                    // 🚀 여기서 함수를 강제 종료하여, 재생 중인 앨범 아트가 배경을 덮어쓰지 못하게 철벽 방어합니다!
+                    return;
                 }
             }
 
+            // 🚀 2. 커스텀 배경이 없다면(해제했다면), 기존처럼 앨범 아트나 기본 이미지에 '블러'를 먹여서 출력합니다.
+            Bitmap sourceBitmap = null;
+            if (lastAlbumArtBytes != null && lastAlbumArtBytes.length > 0) {
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inSampleSize = 4;
+                sourceBitmap = BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length, opts);
+            } else {
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inSampleSize = 2;
+                sourceBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.default_back, opts);
+            }
+
             if (sourceBitmap != null) {
-                // 🚀 불러온 이미지(default_back 포함)에 렌더스크립트 블러 엔진을 입힙니다.
                 Bitmap blurredBitmap = applyGaussianBlur(sourceBitmap);
                 ivMainBg.setImageBitmap(blurredBitmap);
-
                 if (sourceBitmap != blurredBitmap) {
                     sourceBitmap.recycle();
                 }
             } else {
-                // 만약 위 과정에서 에러가 났을 경우를 대비한 최후의 안전장치
                 ivMainBg.setImageResource(R.drawable.default_back);
             }
         } catch (Throwable t) {
             ivMainBg.setImageResource(R.drawable.default_back);
         }
     }
-
+    // 💡 [추가] 테마 색상과 '둥글기(Radius)'를 혼합해서 버튼의 배경 디자인을 찍어내는 도구
+    private android.graphics.drawable.GradientDrawable createButtonBackground(int color) {
+        android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
+        shape.setColor(color); // 테마 색상 주입
+        // 테마에 설정된 둥글기(Radius) 값 주입 (dp 단위를 픽셀로 변환하여 적용)
+        float radius = ThemeManager.getButtonRadius() * getResources().getDisplayMetrics().density;
+        shape.setCornerRadius(radius);
+        return shape;
+    }
     // 💡 [수정] 메인 화면의 버튼들에 휠이 닿았을 때의 색상을 테마 엔진과 연결합니다!
-    private void setupMenuButton(final Button btn, final int imageResId) {
+    private void setupMenuButton(final Button btn, final int imageResId, final String iconFileName) {
         btn.setSoundEffectsEnabled(false);
         btn.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
-                    btn.setBackgroundColor(ThemeManager.getListButtonFocusedBg());
+                    btn.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg())); // 🚀 둥글기 적용
                     btn.setTextColor(ThemeManager.getListButtonFocusedTextColor());
 
                     // 🚀 [수정] 재생 상태를 확인하여 초기 아이콘(원형)과 빈 앨범 아이콘(사각형)을 완벽하게 구분합니다!
@@ -1065,6 +1075,7 @@ public class MainActivity extends Activity {
 
                         // 1. 노래가 아예 재생된 적이 없는 '초기 상태'일 때 -> 둥근 음표 아이콘(music_circle) 유지
                         if (currentPlaylist.isEmpty()) {
+                            ivMenuPreview.setImageBitmap(ThemeManager.getCustomIcon(iconFileName, MainActivity.this, imageResId));
                             ivMenuPreview.setImageResource(imageResId);
                             if (tvMenuPreviewTitle != null && tvMenuPreviewArtist != null) {
                                 tvMenuPreviewTitle.setVisibility(View.GONE);
@@ -1080,9 +1091,11 @@ public class MainActivity extends Activity {
                                     android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length, opts);
                                     ivMenuPreview.setImageBitmap(bmp);
                                 } catch (Exception e) {
+                                    ivMenuPreview.setImageBitmap(ThemeManager.getCustomIcon("icon_default_album.png", MainActivity.this, R.drawable.default_album));
                                     ivMenuPreview.setImageResource(R.drawable.default_album); // 에러 시 사각형 앨범
                                 }
                             } else {
+                                ivMenuPreview.setImageBitmap(ThemeManager.getCustomIcon("icon_default_album.png", MainActivity.this, R.drawable.default_album));
                                 ivMenuPreview.setImageResource(R.drawable.default_album); // 이미지가 없으면 사각형 앨범
                             }
 
@@ -1097,6 +1110,7 @@ public class MainActivity extends Activity {
 
                     } else {
                         // 다른 메뉴(Settings, Bluetooth 등)에 닿았을 때는 원래 아이콘만 보여주고 텍스트를 숨깁니다.
+                        ivMenuPreview.setImageBitmap(ThemeManager.getCustomIcon(iconFileName, MainActivity.this, imageResId));
                         ivMenuPreview.setImageResource(imageResId);
                         if (tvMenuPreviewTitle != null && tvMenuPreviewArtist != null) {
                             tvMenuPreviewTitle.setVisibility(View.GONE);
@@ -1644,13 +1658,13 @@ public class MainActivity extends Activity {
         layout.setFocusable(true);
         layout.setPadding(20, 15, 20, 15);
 
-        // 🚀 테마 매니저 연결!
-        layout.setBackgroundColor(ThemeManager.getListButtonNormalBg());
+        // 🚀 [수정 완료] 단색 덮어쓰기(setBackgroundColor)를 삭제하고, 둥글기가 적용된 배경만 입힙니다!
+        layout.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
 
         TextView tvLeft = new TextView(this);
         tvLeft.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.NORMAL);
         tvLeft.setText(leftText);
-        tvLeft.setTextColor(ThemeManager.getTextColorPrimary()); // 🚀 테마 매니저
+        tvLeft.setTextColor(ThemeManager.getTextColorPrimary());
         tvLeft.setTextSize(18);
         tvLeft.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 
@@ -1674,7 +1688,8 @@ public class MainActivity extends Activity {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
-                    layout.setBackgroundColor(ThemeManager.getListButtonFocusedBg());
+                    // 🚀 포커스 상태 둥근 배경 적용! (단색 덮어쓰기 제거)
+                    layout.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg()));
                     ((TextView) layout.getChildAt(0)).setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     ((TextView) layout.getChildAt(1)).setTextColor(ThemeManager.getListButtonFocusedTextColor());
 
@@ -1683,7 +1698,8 @@ public class MainActivity extends Activity {
                         if (idx != -1) lastSettingsFocusIndex = idx;
                     }
                 } else {
-                    layout.setBackgroundColor(ThemeManager.getListButtonNormalBg());
+                    // 🚀 일반 상태 둥근 배경 적용! (단색 덮어쓰기 제거)
+                    layout.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
                     ((TextView) layout.getChildAt(0)).setTextColor(ThemeManager.getTextColorPrimary());
 
                     TextView rightTv = (TextView) layout.getChildAt(1);
@@ -1704,15 +1720,14 @@ public class MainActivity extends Activity {
     }
     private Button createListButton(String text) {
         final Button btn = new Button(this);
-        // [수정] 기본 폰트 대신 테마 폰트를 장착합니다.
+
+        // 🚀 [수정 완료] 단색 덮어쓰기(setBackgroundColor)를 삭제하고, 둥글기가 적용된 배경만 입힙니다!
+        btn.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
         btn.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.NORMAL);
         btn.setSoundEffectsEnabled(false);
         btn.setText(text);
         btn.setTextSize(18);
-
-        // 🚀 테마 매니저 연결!
         btn.setTextColor(ThemeManager.getTextColorPrimary());
-        btn.setBackgroundColor(ThemeManager.getListButtonNormalBg());
 
         btn.setGravity(android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL);
         btn.setPadding(20, 10, 10, 10);
@@ -1723,12 +1738,12 @@ public class MainActivity extends Activity {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
-                    // 🚀 테마 매니저 연결!
-                    btn.setBackgroundColor(ThemeManager.getListButtonFocusedBg());
+                    // 🚀 포커스 상태 둥근 배경 적용! (단색 덮어쓰기 제거)
+                    btn.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg()));
                     btn.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                 } else {
-                    // 🚀 테마 매니저 연결!
-                    btn.setBackgroundColor(ThemeManager.getListButtonNormalBg());
+                    // 🚀 일반 상태 둥근 배경 적용! (단색 덮어쓰기 제거)
+                    btn.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
                     btn.setTextColor(ThemeManager.getTextColorPrimary());
                 }
             }
@@ -2041,12 +2056,31 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 clickFeedback();
                 isPickingBackground = true;
-                currentBrowserMode = BROWSER_FOLDER; // 💡 배경화면 찾을 땐 강제로 파일 탐색기 모드로!
+                currentBrowserMode = BROWSER_FOLDER;
                 changeScreen(STATE_BROWSER);
                 Toast.makeText(MainActivity.this, "Select a JPG/PNG image", Toast.LENGTH_SHORT).show();
             }
         });
         containerSettingsItems.addView(btnBg);
+
+        // 🚀 [여기에 새로 추가!] 지정한 커스텀 배경을 해제하고 원래대로 돌리는 버튼
+        LinearLayout btnClearBg = createSettingRow("Clear Custom Background", "〉 ");
+        btnClearBg.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                if (prefs.contains("bg_path")) {
+                    prefs.edit().remove("bg_path").commit(); // 기억해둔 배경 경로를 영구 삭제!
+                    Toast.makeText(MainActivity.this, "Custom background cleared.", Toast.LENGTH_SHORT).show();
+
+                    // 삭제하자마자 화면을 즉시 갱신하여 앨범 아트(블러) 모드로 부드럽게 복귀시킵니다.
+                    updateMainMenuBackground();
+                } else {
+                    Toast.makeText(MainActivity.this, "No custom background set.", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        containerSettingsItems.addView(btnClearBg);
 // 🚀 [추가 2] 기기에 쌓인 앨범 아트 캐시 파일들 한 번에 지우기 (용량 확보)
         LinearLayout btnClearCache = createSettingRow("Clear Album Art Cache", "〉 ");
         btnClearCache.setOnClickListener(new View.OnClickListener() {
@@ -2214,7 +2248,7 @@ public class MainActivity extends Activity {
         if (currentBrowserMode == BROWSER_ROOT) {
             tvBrowserPath.setText("Library: Main Menu");
 
-            Button btnFolder = createListButton("📁 Folders (Original)");
+            Button btnFolder = createListButton("📁 Folders");
             btnFolder.setOnClickListener(v -> {
                 clickFeedback();
                 currentBrowserMode = BROWSER_FOLDER;
