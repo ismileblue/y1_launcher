@@ -57,7 +57,10 @@ public class Y1EqAudioProcessor implements AudioProcessor {
         pendingAudioFormat = inputAudioFormat;
 
         // 🚀 [폭탄 완전 해체] 16비트일 때만 수학 공식을 세팅합니다!
-        isFormatSupported = (inputAudioFormat.encoding == com.google.android.exoplayer2.C.ENCODING_PCM_16BIT);
+        // 🚀 [V3 추가 방어막] 96kHz 이상의 고음질은 200MHz CPU에서 EQ 연산 시 무조건 렉이 발생합니다.
+        // 따라서 48kHz 이하의 음원(MP3 등)에서만 EQ가 작동하도록 강제 차단합니다! (고음질은 EQ 자동 패스)
+        isFormatSupported = (inputAudioFormat.encoding == com.google.android.exoplayer2.C.ENCODING_PCM_16BIT) 
+                            && (inputAudioFormat.sampleRate <= 48000);
 
         return inputAudioFormat; // 💡 입력된 포맷을 그대로 안전하게 출력 선언!
     }
@@ -80,7 +83,16 @@ public class Y1EqAudioProcessor implements AudioProcessor {
         }
 
         // 🚀 스위치가 꺼져있거나 16비트가 아니라면, 0.0001초 만에 원본 그대로 프리패스!
-        if (!isActive || !isFormatSupported) {
+        // 🚀 [초극강 최적화] 사용자가 EQ를 '기본(Flat)'으로 설정했거나 모든 밴드가 0dB라면 연산을 100% 스킵합니다!
+        boolean isAllFlat = true;
+        for (int i = 0; i < 10; i++) {
+            if (Math.abs(currentGains[i]) > 0.01f) {
+                isAllFlat = false;
+                break;
+            }
+        }
+
+        if (!isActive || !isFormatSupported || isAllFlat) {
             if (inputBuffer.hasRemaining()) {
                 buffer.put(inputBuffer);
             }
@@ -98,8 +110,12 @@ public class Y1EqAudioProcessor implements AudioProcessor {
                 short rawSample = inputBuffer.getShort();
                 float sample = rawSample / 32768.0f;
 
+                // 🚀 [핵심 최적화] 0dB가 아닌 밴드에 대해서만 필터 연산을 수행합니다!
+                // 10개 밴드 중 1개만 건드려도 9개는 패스하므로 연산량이 90% 줄어듭니다!
                 for (int band = 0; band < 10; band++) {
-                    sample = filters[ch][band].process(sample);
+                    if (Math.abs(currentGains[band]) > 0.01f) {
+                        sample = filters[ch][band].process(sample);
+                    }
                 }
 
                 if (sample > 1.0f) sample = 1.0f;

@@ -334,15 +334,18 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="30dp"
-        android:paddingTop="36dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="5dp"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        
         android:background="#66000000"
         android:visibility="gone"
         android:gravity="center">
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" text="STORAGE INFO" android:textColor="#BBFFFFFF" android:textSize="20sp" android:textStyle="bold" android:layout_marginBottom="30dp"/>
-        <ProgressBar android:id="@+id/pb_storage" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="20dp" android:layout_marginBottom="15dp"/>
-        <TextView android:id="@+id/tv_storage_details" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Used: 0MB / Total: 0MB" android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"/>
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Press [Back] to return." android:textColor="#888888" android:textSize="14sp" android:layout_marginTop="30dp"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="STORAGE INFO" android:textColor="#BBFFFFFF" android:textSize="16sp" android:textStyle="bold" android:layout_marginBottom="5dp"/>
+        <ProgressBar android:id="@+id/pb_storage" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="20dp" android:layout_marginBottom="5dp"/>
+        <TextView android:id="@+id/tv_storage_details" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Used: 0MB / Total: 0MB" android:textColor="#FFFFFF" android:textSize="14sp" android:textStyle="bold"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Press [Back] to return." android:textColor="#888888" android:textSize="12sp" android:layout_marginTop="10dp"/>
     </LinearLayout>
 
     <LinearLayout

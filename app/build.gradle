@@ -16,8 +16,18 @@ android {
         ndk {
             abiFilters 'armeabi-v7a'
         }
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++11"
+            }
+        }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled true
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+        }
     }
     signingConfigs {
         release {
