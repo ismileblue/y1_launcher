@@ -53,7 +53,7 @@ public class ThemeManager {
         public int bgOverlay, statusBarBg;
         public int btnNormal, btnFocused, btnFocusedText, buttonRadius;
         public List<MenuElement> menuElements;
-
+        public List<MenuElement> playerElements;
         public ThemeData(String folderPath, String name, String bgImage, android.graphics.Typeface customFont,
                          int textPrimary, int textSecondary, int bgOverlay, int statusBarBg,
                          int btnNormal, int btnFocused, int btnFocusedText, int buttonRadius) {
@@ -64,6 +64,7 @@ public class ThemeManager {
             this.btnNormal = btnNormal; this.btnFocused = btnFocused;
             this.btnFocusedText = btnFocusedText; this.buttonRadius = buttonRadius;
             this.menuElements = new ArrayList<>();
+            this.playerElements = new ArrayList<>();
         }
     }
 
@@ -287,6 +288,30 @@ public class ThemeManager {
                                     ));
                                 }
                             }
+
+                            // 🚀 [신규 장착] 플레이어 화면용 "player_ui" 해독 엔진!
+                            if (json.has("player_ui")) {
+                                JSONArray playerArray = json.getJSONArray("player_ui");
+                                for (int i = 0; i < playerArray.length(); i++) {
+                                    JSONObject el = playerArray.getJSONObject(i);
+                                    theme.playerElements.add(new MenuElement(
+                                            el.optString("id", ""),
+                                            el.optString("type", ""),
+                                            "", "",
+                                            el.optInt("x", 0), el.optInt("y", 0),
+                                            el.optInt("width", -1), el.optInt("height", -1),
+                                            "", "", "", "", "", "", "", "", "NONE",
+                                            el.optString("gravity", "center"),
+                                            el.optInt("radius", 0), // 🚀 둥근 모서리 값
+                                            -1,
+                                            el.optInt("text_size", 16),
+                                            -1, "",
+                                            el.optString("text_align", "center"), // 🚀 텍스트 정렬
+                                            el.optString("bg_color", ""), 0, 0, 0, 1.0f
+                                    ));
+                                }
+                            }
+
                             availableThemes.add(theme);
                         } catch (Exception e) { e.printStackTrace(); }
                     }

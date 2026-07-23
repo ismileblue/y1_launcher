@@ -363,8 +363,15 @@ public class AudioPlayerManager {
                         final android.graphics.Bitmap finalBmp = bmp;
                         main.runOnUiThread(() -> {
                             main.ivAlbumArt.setImageBitmap(finalBmp);
-                            android.graphics.Bitmap blurredBg = main.applyGaussianBlur(finalBmp);
-                            main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                            // 🚀 [배경 테마 엔진 적용 1: 팟캐스트]
+                            if ("clear".equals(main.currentPlayerBgMode)) {
+                                main.ivPlayerBgBlur.setImageBitmap(finalBmp);
+                            } else if ("blur".equals(main.currentPlayerBgMode)) {
+                                android.graphics.Bitmap blurredBg = main.applyGaussianBlur(finalBmp);
+                                main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                            } else {
+                                main.ivPlayerBgBlur.setImageBitmap(null);
+                            }
                             try {
                                 main.currentAlbumColor = finalBmp.getPixel(finalBmp.getWidth()/2, (int)(finalBmp.getHeight()*0.8)) | 0xFF000000;
                             } catch (Exception ex) {
@@ -632,9 +639,19 @@ public class AudioPlayerManager {
                     android.graphics.BitmapFactory.Options optsBg = new android.graphics.BitmapFactory.Options();
                     optsBg.inSampleSize = 4;
                     android.graphics.Bitmap sourceBg = android.graphics.BitmapFactory.decodeByteArray(main.lastAlbumArtBytes, 0, main.lastAlbumArtBytes.length, optsBg);
-                    android.graphics.Bitmap blurredBg = main.applyGaussianBlur(sourceBg);
-                    main.ivPlayerBgBlur.setImageBitmap(blurredBg);
-                    if (sourceBg != blurredBg) sourceBg.recycle();
+                  //  android.graphics.Bitmap blurredBg = main.applyGaussianBlur(sourceBg);
+                    // 🚀 [배경 테마 엔진 적용 2: 일반 태그 음악]
+                    if ("clear".equals(main.currentPlayerBgMode)) {
+                        main.ivPlayerBgBlur.setImageBitmap(sourceBg);
+                    } else if ("blur".equals(main.currentPlayerBgMode)) {
+                        android.graphics.Bitmap blurredBg = main.applyGaussianBlur(sourceBg);
+                        main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                        if (sourceBg != blurredBg) sourceBg.recycle();
+                    } else {
+                        main.ivPlayerBgBlur.setImageBitmap(null);
+                        sourceBg.recycle();
+                    }
+
 
                     try {
                         int centerX = bmpCenter.getWidth() / 2;
@@ -666,9 +683,15 @@ public class AudioPlayerManager {
 
                     main.ivAlbumArt.setImageBitmap(bmp);
 
-                    // 4. 홀쭉해진 이미지로 배경 블러(RenderScript)를 0.05초 만에 초고속 처리!
-                    android.graphics.Bitmap blurredBg = main.applyGaussianBlur(bmp);
-                    main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                    // 🚀 [배경 테마 엔진 적용 3: 다운로드된 커버 이미지]
+                    if ("clear".equals(main.currentPlayerBgMode)) {
+                        main.ivPlayerBgBlur.setImageBitmap(bmp);
+                    } else if ("blur".equals(main.currentPlayerBgMode)) {
+                        android.graphics.Bitmap blurredBg = main.applyGaussianBlur(bmp);
+                        main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                    } else {
+                        main.ivPlayerBgBlur.setImageBitmap(null);
+                    }
 
                     try {
                         int centerX = bmp.getWidth() / 2;
