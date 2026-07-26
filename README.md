@@ -8,7 +8,10 @@
 <img width="480" height="360" alt="Screenshot_20260624_181608" src="https://github.com/user-attachments/assets/28a48351-68c6-43c4-87d7-86d692abb661" />
 <img width="480" height="360" alt="Screenshot_20260624_181513" src="https://github.com/user-attachments/assets/4ceb794c-fea9-4bea-a716-f1993ea29c67" />
 
+## ☕ Support / Donation
+If you like my project, consider buying me a coffee!
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Donate-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/ismileblue)
 # JJ Launcher (MO-ON Launcher)
 for innioasis y1
 <p align="center">
@@ -227,3 +230,7 @@ This is the core of your theme. Create a text file named exactly `config.json` i
 > **💡 Quick Tip:** Always use **8-character Hex Codes** (e.g., `#DD0F172A`) for background colors if you want transparency. The first two characters (`DD`) control the opacity (`00` for invisible, `FF` for solid).
 
 
+## ☕ Support / Donation
+If you like my project, consider buying me a coffee!
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Donate-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/ismileblue)
