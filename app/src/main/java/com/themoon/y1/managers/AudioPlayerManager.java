@@ -205,6 +205,36 @@ public class AudioPlayerManager {
         if (exoPlayer != null) {
             exoPlayer.setShuffleModeEnabled(isShuffle);
         }
+        MainActivity main = MainActivity.instance;
+        if (main != null && main.currentPlaylist != null && !main.currentPlaylist.isEmpty()) {
+            File currentSong = null;
+            if (main.currentIndex >= 0 && main.currentIndex < main.currentPlaylist.size()) {
+                currentSong = main.currentPlaylist.get(main.currentIndex);
+            }
+            if (isShuffle) {
+                if (main.originalPlaylist == null) {
+                    main.originalPlaylist = new java.util.ArrayList<>();
+                }
+                if (main.originalPlaylist.isEmpty() || main.originalPlaylist.size() != main.currentPlaylist.size()) {
+                    main.originalPlaylist.clear();
+                    main.originalPlaylist.addAll(main.currentPlaylist);
+                }
+                java.util.Collections.shuffle(main.currentPlaylist);
+                if (currentSong != null) {
+                    int newIdx = main.currentPlaylist.indexOf(currentSong);
+                    if (newIdx != -1) main.currentIndex = newIdx;
+                }
+            } else {
+                if (main.originalPlaylist != null && !main.originalPlaylist.isEmpty() && main.originalPlaylist.size() == main.currentPlaylist.size()) {
+                    main.currentPlaylist.clear();
+                    main.currentPlaylist.addAll(main.originalPlaylist);
+                    if (currentSong != null) {
+                        int newIdx = main.currentPlaylist.indexOf(currentSong);
+                        if (newIdx != -1) main.currentIndex = newIdx;
+                    }
+                }
+            }
+        }
     }
     public float getCurrentSpeed() { return currentSpeed; }
 

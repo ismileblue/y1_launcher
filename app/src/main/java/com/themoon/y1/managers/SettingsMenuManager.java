@@ -114,7 +114,7 @@ public class SettingsMenuManager {
         main.containerSettingsItems.removeAllViews();
         updateSettingsTitle(t("Audio & Playback"));
 
-        final LinearLayout btnShuffle = createSettingRow(t("Shuffle Mode"), main.isShuffleMode ? t("ON") : t("OFF"));
+        final LinearLayout btnShuffle = createSettingRow(t("Shuffle"), main.isShuffleMode ? t("ON") : t("OFF"));
         btnShuffle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -130,7 +130,7 @@ public class SettingsMenuManager {
         });
         main.containerSettingsItems.addView(btnShuffle);
 
-        final LinearLayout btnRepeat = createSettingRow(t("Repeat Mode"), t(main.getRepeatModeText(main.repeatMode)));
+        final LinearLayout btnRepeat = createSettingRow(t("Repeat"), t(main.getRepeatModeText(main.repeatMode)));
         btnRepeat.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -232,7 +232,18 @@ public class SettingsMenuManager {
             }
         });
         main.containerSettingsItems.addView(btnBrightMenu);
+// 🚀 [신규 장착] 스크린 필터 메뉴
+        LinearLayout btnFilterMenu = createSettingRow(t("Screen Filter"), "〉 ");
+        btnFilterMenu.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                buildScreenFilterSettingsUI(); // 전용 스튜디오 오픈!
+            }
+        });
+        main.containerSettingsItems.addView(btnFilterMenu);
 
+        // (기존 코드) LinearLayout btnBrightMenu = createSettingRow(t("Display Brightness"), "〉 ");
         final LinearLayout btnTimeout = createSettingRow(t("Screen Timeout"), t(main.TIMEOUT_NAMES[main.currentTimeoutIndex]));
         btnTimeout.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -624,4 +635,270 @@ public class SettingsMenuManager {
 
         return row;
     }
+
+    // =======================================================
+    // 🚀 [스크린 필터 스튜디오] 채도 & RGB 슬라이더 팝업
+    // =======================================================
+    public void buildScreenFilterSettingsUI() {
+        main.currentSettingsDepth = 2;
+        main.containerSettingsItems.removeAllViews();
+        updateSettingsTitle(t("Screen Filter"));
+
+        final boolean[] isEnabled = {main.prefs.getBoolean("filter_enabled", false)};
+
+        // 1. 필터 전원 스위치
+        final LinearLayout btnToggle = createSettingRow(t("Filter Power"), isEnabled[0] ? t("ON") : t("OFF"));
+        btnToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                isEnabled[0] = !isEnabled[0];
+                ((TextView) btnToggle.getChildAt(1)).setText(isEnabled[0] ? t("ON") : t("OFF"));
+                main.prefs.edit().putBoolean("filter_enabled", isEnabled[0]).commit();
+                main.applyScreenFilter(); // 💡 켜고 끌 때 즉시 적용!
+            }
+        });
+        main.containerSettingsItems.addView(btnToggle);
+
+        // =======================================================
+        // 🎨 2. [신규 장착] 실시간 색상 팔레트 (Current Color) 표시기!
+        // =======================================================
+        float d = main.getResources().getDisplayMetrics().density;
+        final TextView paletteView = new TextView(main);
+        paletteView.setText(t("Current Color"));
+        paletteView.setTextColor(0xFFFFFFFF);
+        paletteView.setTextSize(16f);
+        paletteView.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
+        paletteView.setGravity(Gravity.CENTER);
+        paletteView.setShadowLayer(4, 0, 0, 0xFF000000); // 💡 밝은 색상에서도 글씨가 잘 보이게 진한 그림자!
+
+        LinearLayout.LayoutParams palLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int)(60 * d));
+        palLp.setMargins((int)(20*d), (int)(10*d), (int)(20*d), (int)(15*d));
+        paletteView.setLayoutParams(palLp);
+
+        final GradientDrawable paletteBg = new GradientDrawable();
+        paletteBg.setCornerRadius(15 * d);
+        paletteBg.setStroke((int)(2*d), 0x33FFFFFF);
+        paletteView.setBackground(paletteBg);
+        main.containerSettingsItems.addView(paletteView);
+
+        // 💡 팔레트 색상 실시간 갱신용 도우미
+        final Runnable updatePalette = new Runnable() {
+            @Override
+            public void run() {
+                int r = main.prefs.getInt("filter_r", 136);
+                int g = main.prefs.getInt("filter_g", 204);
+                int b = main.prefs.getInt("filter_b", 136);
+                paletteBg.setColor(android.graphics.Color.rgb(r, g, b));
+                paletteView.invalidate();
+            }
+        };
+        updatePalette.run(); // 진입 시 1회 색상 적용
+        // =======================================================
+
+        // 3. 현재 저장된 설정값 불러오기
+        int sat = main.prefs.getInt("filter_saturation", 0);
+        int r = main.prefs.getInt("filter_r", 136);
+        int g = main.prefs.getInt("filter_g", 204);
+        int b = main.prefs.getInt("filter_b", 136);
+
+        // 4. 채도(Saturation) 슬라이더 (0~100)
+        main.containerSettingsItems.addView(createSliderRow(t("Saturation"), 100, sat, new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                main.prefs.edit().putInt("filter_saturation", p).commit();
+                main.applyScreenFilter();
+                updatePalette.run(); // 🎨 슬라이더 움직일 때마다 팔레트 갱신!
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        }));
+
+        // 5. Red 슬라이더 (0~255)
+        main.containerSettingsItems.addView(createSliderRow(t("Red"), 255, r, new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                main.prefs.edit().putInt("filter_r", p).commit();
+                main.applyScreenFilter();
+                updatePalette.run();
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        }));
+
+        // 6. Green 슬라이더 (0~255)
+        main.containerSettingsItems.addView(createSliderRow(t("Green"), 255, g, new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                main.prefs.edit().putInt("filter_g", p).commit();
+                main.applyScreenFilter();
+                updatePalette.run();
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        }));
+
+        // 7. Blue 슬라이더 (0~255)
+        main.containerSettingsItems.addView(createSliderRow(t("Blue"), 255, b, new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                main.prefs.edit().putInt("filter_b", p).commit();
+                main.applyScreenFilter();
+                updatePalette.run();
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        }));
+
+        // 8. 기본값 리셋 버튼
+        Button btnReset = main.createListButton("🔄 " + t("Reset to Default"));
+        btnReset.setTextColor(0xFFFF8800);
+        btnReset.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                main.prefs.edit()
+                        .putInt("filter_saturation", 0)
+                        .putInt("filter_r", 136)
+                        .putInt("filter_g", 204)
+                        .putInt("filter_b", 136)
+                        .commit();
+                main.applyScreenFilter();
+                buildScreenFilterSettingsUI(); // 화면 리로드
+                Toast.makeText(main, t("Reset to Default"), Toast.LENGTH_SHORT).show();
+            }
+        });
+        main.containerSettingsItems.addView(btnReset);
+
+        if (main.containerSettingsItems.getChildCount() > 0) {
+            main.containerSettingsItems.getChildAt(0).requestFocus();
+        }
+    }
+
+    // 🚀 [슬라이더 UI 생성기] 가운데 버튼 클릭으로 포커스를 풀고 잠그는 스위치 엔진 장착!
+    private LinearLayout createSliderRow(final String titleText, final int max, int progress, final android.widget.SeekBar.OnSeekBarChangeListener listener) {
+        float d = main.getResources().getDisplayMetrics().density;
+        final LinearLayout row = new LinearLayout(main);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackground(main.createButtonBackground(ThemeManager.getListButtonNormalBg()));
+        row.setPadding((int)(20*d), (int)(15*d), (int)(20*d), (int)(15*d));
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, 2, 0, 2);
+        row.setLayoutParams(rowLp);
+        row.setFocusable(true);
+        row.setClickable(true);
+        row.setSoundEffectsEnabled(false);
+
+        // =======================================================
+        // 🎯 [핵심 엔진] 편집 모드(슬라이더 휠 조작 상태)인지 기억하는 변수!
+        // =======================================================
+        final boolean[] isEditing = {false};
+
+        LinearLayout header = new LinearLayout(main);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        final TextView tvTitle = new TextView(main);
+        tvTitle.setText(titleText);
+        tvTitle.setTextColor(ThemeManager.getTextColorPrimary());
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.NORMAL);
+        tvTitle.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        final TextView tvVal = new TextView(main);
+        tvVal.setText(String.valueOf(progress));
+        tvVal.setTextColor(ThemeManager.getTextColorSecondary());
+        tvVal.setTextSize(18f);
+        tvVal.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvVal.setGravity(Gravity.RIGHT);
+
+        header.addView(tvTitle);
+        header.addView(tvVal);
+        row.addView(header);
+
+        final android.widget.SeekBar seekBar = new android.widget.SeekBar(main);
+        seekBar.setMax(max);
+        seekBar.setProgress(progress);
+        seekBar.setPadding(0, (int)(15*d), 0, (int)(5*d));
+        seekBar.setFocusable(false); // 💡 슬라이더 자체는 포커스를 받지 않음 (부모 row가 다 통제함)
+
+        // 🚀 테마 색상으로 슬라이더 도색!
+        int themeColor = ThemeManager.getListButtonFocusedBg() | 0xFF000000;
+        try {
+            seekBar.getProgressDrawable().setColorFilter(themeColor, android.graphics.PorterDuff.Mode.SRC_IN);
+            if (android.os.Build.VERSION.SDK_INT >= 16) {
+                seekBar.getThumb().setColorFilter(themeColor, android.graphics.PorterDuff.Mode.SRC_IN);
+            }
+        } catch (Exception e) {}
+
+        seekBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                tvVal.setText(String.valueOf(p));
+                if (listener != null) listener.onProgressChanged(sb, p, fromUser);
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        });
+        row.addView(seekBar);
+
+        // =======================================================
+        // 🚀 가운데 클릭 시 편집 모드(Edit Mode) ON / OFF 전환 스위치!
+        // =======================================================
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                main.clickFeedback();
+                isEditing[0] = !isEditing[0]; // 모드 전환!
+
+                if (isEditing[0]) {
+                    // 편집 모드 ON: 주황색으로 반짝이고 텍스트 옆에 연필 아이콘!
+                    tvVal.setTextColor(0xFFFF8800);
+                    tvTitle.setText(titleText + " ✏️");
+                } else {
+                    // 편집 모드 OFF: 원래대로 복구
+                    tvVal.setTextColor(ThemeManager.getListButtonFocusedTextColor());
+                    tvTitle.setText(titleText);
+                }
+            }
+        });
+
+        // 🚀 포커스 하이라이트 효과 (편집 모드가 아닐 때 위아래로 빠져나가면 편집 강제 종료)
+        row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (hasFocus) {
+                    row.setBackground(main.createButtonBackground(ThemeManager.getListButtonFocusedBg()));
+                    tvTitle.setTextColor(ThemeManager.getListButtonFocusedTextColor());
+                    tvVal.setTextColor(isEditing[0] ? 0xFFFF8800 : ThemeManager.getListButtonFocusedTextColor());
+                } else {
+                    // 포커스가 빠져나가면 강제로 편집 모드 해제!
+                    isEditing[0] = false;
+                    tvTitle.setText(titleText);
+                    row.setBackground(main.createButtonBackground(ThemeManager.getListButtonNormalBg()));
+                    tvTitle.setTextColor(ThemeManager.getTextColorPrimary());
+                    tvVal.setTextColor(ThemeManager.getTextColorSecondary());
+                }
+            }
+        });
+
+        // =======================================================
+        // 🚀 물리 버튼(휠) 가로채기 엔진
+        // =======================================================
+        row.setOnKeyListener(new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, android.view.KeyEvent event) {
+                // 편집 모드일 때만 휠의 모든(상하좌우) 이벤트를 가로채서 슬라이더를 움직입니다!
+                if (isEditing[0] && event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    int step = max > 100 ? 5 : 2;
+                    if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == 21 || keyCode == 19) {
+                        seekBar.setProgress(Math.max(0, seekBar.getProgress() - step));
+                        return true; // 🚨 여기서 이벤트를 먹어버려서 리스트 스크롤이 잠깁니다!
+                    } else if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == 22 || keyCode == 20) {
+                        seekBar.setProgress(Math.min(seekBar.getMax(), seekBar.getProgress() + step));
+                        return true;
+                    }
+                }
+                // 편집 모드가 아니면(false), 위/아래 휠 신호를 시스템에 그대로 반환해서 다른 항목으로 스크롤이 되게 합니다!
+                return false;
+            }
+        });
+
+        return row;
+    }
+
 }

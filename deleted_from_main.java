@@ -173,7 +173,7 @@
 
         // createCategoryHeader("??QUICK SETTINGS ??);
 
-        final LinearLayout btnShuffle = createSettingRow("Shuffle Mode", isShuffleMode ? t("ON") : t("OFF"));
+        final LinearLayout btnShuffle = createSettingRow("Shuffle", isShuffleMode ? t("ON") : t("OFF"));
         btnShuffle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -211,7 +211,7 @@
         });
         containerSettingsItems.addView(btnShuffle);
 
-        final LinearLayout btnRepeat = createSettingRow("Repeat Mode", t(getRepeatModeText(repeatMode)));
+        final LinearLayout btnRepeat = createSettingRow("Repeat", t(getRepeatModeText(repeatMode)));
         btnRepeat.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {

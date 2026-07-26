@@ -123,44 +123,42 @@ public class SongListAdapter extends BaseAdapter {
             }
         }
 
-        boolean hasProgress = false;
-        if (MainActivity.instance.isAudiobookLibraryMode) {
-            int pos = MainActivity.instance.prefs.getInt("book_pos_" + song.file.getAbsolutePath(), 0);
-            int dur = MainActivity.instance.prefs.getInt("book_dur_" + song.file.getAbsolutePath(), 0);
-            if (pos > 0 && dur > 0) {
-                MainActivity.instance.setupAudiobookProgress(btn, pos, dur);
-                hasProgress = true;
-            }
-        }
-// =======================================================
-        // 🚀 2. [추가] 팟캐스트 에피소드 배경 프로그레스 바 연동!
         // =======================================================
+        // 🚀 [포커스 늪 버그 수리 완료] 진행률과 포커스 센서를 하나로 완벽하게 묶습니다!
+        // =======================================================
+        int pos = 0;
+        int dur = 0;
+
+        if (MainActivity.instance.isAudiobookLibraryMode) {
+            pos = MainActivity.instance.prefs.getInt("book_pos_" + song.file.getAbsolutePath(), 0);
+            dur = MainActivity.instance.prefs.getInt("book_dur_" + song.file.getAbsolutePath(), 0);
+        }
+
         if (MainActivity.instance.currentBrowserMode == 14) {
             String safeChannel = song.artist.replaceAll("[\\\\/:*?\"<>|]", "_");
             String safeTitle = song.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
             java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
-
             String streamKey = "/PODCAST_STREAM/" + safeChannel + "/" + safeTitle;
 
-            // 💡 로컬(다운로드) 파일 재생 기록부터 찾기
-            int pos = MainActivity.instance.prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
-            int dur = MainActivity.instance.prefs.getInt("book_dur_" + localFile.getAbsolutePath(), 0);
+            pos = MainActivity.instance.prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
+            dur = MainActivity.instance.prefs.getInt("book_dur_" + localFile.getAbsolutePath(), 0);
 
-            // 💡 다운로드 기록이 없으면 스트리밍 재생 기록 찾기
             if (pos == 0 || dur == 0) {
                 pos = MainActivity.instance.prefs.getInt("book_pos_" + streamKey, 0);
                 dur = MainActivity.instance.prefs.getInt("book_dur_" + streamKey, 0);
             }
+        }
 
-            // 🎯 기억된 시간과 곡의 전체 길이가 존재하면 오디오북과 동일한 배경 진행률 효과 발사!
-            if (pos > 0 && dur > 0) {
-                MainActivity.instance.setupAudiobookProgress(btn, pos, dur);
-                hasProgress = true;
-            }
+        // 처음 화면에 그릴 때 진행률이 있으면 그려주고, 없으면 일반 배경 세팅
+        if (pos > 0 && dur > 0) {
+            MainActivity.instance.setupAudiobookProgress(btn, pos, dur);
+        } else {
+            btn.setBackground(MainActivity.instance.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonNormalBg()));
         }
-        if (!hasProgress) {
-            applyDefaultFocusListener(btn, song.title, customColor);
-        }
+
+        // 🚨 예외 없이 무조건 포커스 센서 장착! (pos, dur 값을 같이 넘겨줍니다)
+        applyDefaultFocusListener(btn, song.title, customColor, pos, dur);
+        // =======================================================
 
         // 🚀 [클릭 이벤트 처리]
         btn.setOnClickListener(new View.OnClickListener() {
@@ -234,12 +232,47 @@ public class SongListAdapter extends BaseAdapter {
                 MainActivity.instance.clickFeedback();
                 MainActivity.instance.isLongPressConsumed = true;
 
+                // =======================================================
+                // 🚀 [초강력 팟캐스트 식별 엔진]
+                // 모드 번호(14)가 꼬였거나, '최근 추가된 곡/전체 곡'에서 눌렀을 때를 대비해
+                // 파일의 태생(경로)이 팟캐스트면 무조건 이벤트를 가로챕니다!
+                // =======================================================
+                boolean isPodcast = false;
+                if (MainActivity.instance.currentBrowserMode == 14) {
+                    isPodcast = true;
+                } else if (song.file != null && song.file.getAbsolutePath() != null) {
+                    // 실제 파일 주소에 /Podcasts/ 가 포함되어 있거나, 가상 주소인 /PODCAST 를 쓰면 팟캐스트로 인정!
+                    if (song.file.getAbsolutePath().contains("/Podcasts/") || "/PODCAST".equals(song.file.getAbsolutePath())) {
+                        isPodcast = true;
+                    }
+                }
+
+                if (isPodcast) {
+                    String safeChannel = song.artist.replaceAll("[\\\\/:*?\"<>|]", "_");
+                    String safeTitle = song.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
+                    java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
+
+                    // 💡 만약 '전체 곡'이나 '최근 추가된 곡'에서 실제 다운로드된 MP3를 눌렀다면 그 파일 자체를 타겟으로!
+                    if (song.file != null && song.file.getAbsolutePath() != null && song.file.getAbsolutePath().contains("/Podcasts/") && song.file.exists()) {
+                        localFile = song.file;
+                    }
+
+                    if (localFile.exists() && localFile.length() > 0) {
+                        // 🎯 다운로드 완료된 파일이면 삭제 팝업 호출!
+                        MainActivity.instance.showDeletePodcastDialog(localFile, song.title);
+                    } else {
+                        // 🎯 파일이 없으면 안내 메시지만 띄우고 창 열기 원천 차단!
+                        android.widget.Toast.makeText(MainActivity.instance, "📡 " + MainActivity.instance.t("Offline Mode: This episode has not been downloaded yet."), android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                    return true; // 🚨 여기서 완벽하게 탈출! 플레이리스트 창 절대 안 뜸!
+                }
+                // =======================================================
+
                 if (MainActivity.instance.currentBrowserMode == 5) {
                     MainActivity.instance.showRemoveFromFavoritesDialog(song.file);
-                }else if (MainActivity.instance.currentBrowserMode == 7) {
+                } else if (MainActivity.instance.currentBrowserMode == 7) {
                     MainActivity.instance.showRemoveFromPlaylistDialog(song.file);
-                }
-                 else {
+                } else {
                     MainActivity.instance.showAddToPlaylistDialog(song.file);
                 }
                 return true;
@@ -248,15 +281,15 @@ public class SongListAdapter extends BaseAdapter {
 
         return btn;
     }
-    // 🚀 [신규] 유니코드 아이콘 뷰(LinearLayout)와 순정 버튼(Button)을 모두 지원하는 하이브리드 포커스 리스너!
-    private void applyDefaultFocusListener(final android.view.View btn, final String title, final int customColor) {
+    // 🚀 [신규] 배경(Progress)과 포커스를 100% 동시 제어하는 무적의 하이브리드 리스너!
+    private void applyDefaultFocusListener(final android.view.View btn, final String title, final int customColor, final int pos, final int dur) {
         final int normalColor = (customColor != 0) ? customColor : com.themoon.y1.ThemeManager.getTextColorPrimary();
 
-        // 1. 리스너를 미리 변수(listener)에 담아둡니다.
         final android.view.View.OnFocusChangeListener listener = new android.view.View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(android.view.View v, boolean hasFocus) {
                 if (hasFocus) {
+                    // 🎯 포커스가 닿으면 무조건 강조 색상으로 덮습니다!
                     btn.setBackground(MainActivity.instance.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonFocusedBg()));
 
                     if (v instanceof android.widget.LinearLayout) {
@@ -269,12 +302,17 @@ public class SongListAdapter extends BaseAdapter {
                         }
                     } else if (v instanceof android.widget.Button) {
                         ((android.widget.Button) v).setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
-                        v.setSelected(true); // 🚀 텍스트 흐르기 가동!
+                        v.setSelected(true);
                     }
 
                     MainActivity.instance.showFastScrollLetter(title);
                 } else {
-                    btn.setBackground(MainActivity.instance.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonNormalBg()));
+                    // 🎯 포커스가 빠져나갈 때, 재생 기록이 있으면 진행률 바를 다시 복구해 줍니다!
+                    if (pos > 0 && dur > 0) {
+                        MainActivity.instance.setupAudiobookProgress(btn, pos, dur);
+                    } else {
+                        btn.setBackground(MainActivity.instance.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonNormalBg()));
+                    }
 
                     if (v instanceof android.widget.LinearLayout) {
                         android.widget.LinearLayout row = (android.widget.LinearLayout) v;
@@ -286,22 +324,18 @@ public class SongListAdapter extends BaseAdapter {
                         }
                     } else if (v instanceof android.widget.Button) {
                         ((android.widget.Button) v).setTextColor(normalColor);
-                        v.setSelected(false); // 🚀 텍스트 흐르기 정지!
+                        v.setSelected(false);
                     }
                 }
             }
         };
 
-        // 2. 버튼에 리스너를 장착!
         btn.setOnFocusChangeListener(listener);
 
-        // =======================================================
-        // 🚀 [마키 버그 완벽 수리] 리스트 뷰 재활용 시 포커스 증발 방지 엔진!
-        // =======================================================
+        // UI가 그려진 직후 포커스 동기화
         btn.post(new Runnable() {
             @Override
             public void run() {
-                // UI가 화면에 완전히 그려진 직후, 포커스를 쥐고 있다면 억지로 한 번 이벤트를 쏴서 깨워줍니다!
                 if (btn.isFocused()) {
                     listener.onFocusChange(btn, true);
                 }

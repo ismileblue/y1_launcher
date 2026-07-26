@@ -297,17 +297,31 @@ public class ThemeManager {
                                     theme.playerElements.add(new MenuElement(
                                             el.optString("id", ""),
                                             el.optString("type", ""),
-                                            "", "",
+                                            el.optString("parent_id", ""),
+                                            el.optString("visible_on_focus", ""),
                                             el.optInt("x", 0), el.optInt("y", 0),
                                             el.optInt("width", -1), el.optInt("height", -1),
-                                            "", "", "", "", "", "", "", "", "NONE",
-                                            el.optString("gravity", "center"),
-                                            el.optInt("radius", 0), // 🚀 둥근 모서리 값
-                                            -1,
-                                            el.optInt("text_size", 16),
-                                            -1, "",
-                                            el.optString("text_align", "center"), // 🚀 텍스트 정렬
-                                            el.optString("bg_color", ""), 0, 0, 0, 1.0f
+                                            el.optString("text_normal", ""),
+                                            el.optString("text_focused", ""),
+                                            el.optString("text_right", ""),
+                                            el.optString("text_right_color", ""),
+                                            el.optString("text_right_focused_color", ""),
+                                            el.optString("icon_normal", ""),
+                                            el.optString("icon_focused", ""),
+                                            el.optString("preview_image", ""),
+                                            el.optString("action", "NONE"),
+                                            el.optString("gravity", "top|left"),
+                                            el.optInt("radius", -1),
+                                            el.optInt("focus_index", -1),
+                                            el.optInt("text_size", -1),
+                                            el.optInt("text_secondary_size", -1),
+                                            el.optString("text_position", "bottom"),
+                                            el.optString("text_align", "center"),
+                                            el.optString("bg_color", ""),
+                                            el.optInt("padding", 0),
+                                            el.optInt("focus_offset_x", 0),
+                                            el.optInt("focus_offset_y", 0),
+                                            (float) el.optDouble("focus_scale", 1.0)
                                     ));
                                 }
                             }

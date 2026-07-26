@@ -100,7 +100,7 @@ public class SettingsMenuManager {
         main.containerSettingsItems.removeAllViews();
         createCategoryHeader("━ " + t("Audio & Playback") + " ━");
 
-        final LinearLayout btnShuffle = createSettingRow(t("Shuffle Mode"), main.isShuffleMode ? t("ON") : t("OFF"));
+        final LinearLayout btnShuffle = createSettingRow(t("Shuffle"), main.isShuffleMode ? t("ON") : t("OFF"));
         btnShuffle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -116,7 +116,7 @@ public class SettingsMenuManager {
         });
         main.containerSettingsItems.addView(btnShuffle);
 
-        final LinearLayout btnRepeat = createSettingRow(t("Repeat Mode"), t(main.getRepeatModeText(main.repeatMode)));
+        final LinearLayout btnRepeat = createSettingRow(t("Repeat"), t(main.getRepeatModeText(main.repeatMode)));
         btnRepeat.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
