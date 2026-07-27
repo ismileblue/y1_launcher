@@ -402,6 +402,7 @@ public class AudioPlayerManager {
                             } else {
                                 main.ivPlayerBgBlur.setImageBitmap(null);
                             }
+                            main.updatePlayerBgOverlayVisibility();
                             try {
                                 main.currentAlbumColor = finalBmp.getPixel(finalBmp.getWidth()/2, (int)(finalBmp.getHeight()*0.8)) | 0xFF000000;
                             } catch (Exception ex) {
@@ -554,6 +555,7 @@ public class AudioPlayerManager {
         // 🚀 스레드(Thread)를 걷어내고 메인에서 즉시 처리하여 깜빡임/딜레이 현상을 완벽 차단!
         main.tvPlayerTitle.setText(track.getName());
         main.tvPlayerArtist.setText("Loading...");
+        if (main.tvPlayerAlbum != null) main.tvPlayerAlbum.setText("Loading...");
         main.ivAlbumArt.setImageResource(R.drawable.default_album);
         main.ivPlayerBgBlur.setImageResource(0);
         main.playerProgress.setProgress(0);
@@ -568,6 +570,7 @@ public class AudioPlayerManager {
         try {
             String t = null;
             String a = null;
+            String al = null;
             main.lastAlbumArtBytes = null;
 
             // ==========================================
@@ -577,11 +580,13 @@ public class AudioPlayerManager {
                 Object[] opusTags = extractOpusMetadata(track);
                 if (opusTags[0] != null) t = (String) opusTags[0];
                 if (opusTags[1] != null) a = (String) opusTags[1];
+                if (opusTags[2] != null) al = (String) opusTags[2];
                 if (opusTags[5] != null) main.lastAlbumArtBytes = (byte[]) opusTags[5];
             } else if (isFlac) {
                 Object[] flacTags = extractFlacMetadata(track);
                 if (flacTags[0] != null) t = (String) flacTags[0];
                 if (flacTags[1] != null) a = (String) flacTags[1];
+                if (flacTags[2] != null) al = (String) flacTags[2];
                 if (flacTags[5] != null) main.lastAlbumArtBytes = (byte[]) flacTags[5];
 
                 // 🚀 [여기에 신규 장착!] FLAC 검사가 끝나고, 순정 부품으로 넘어가기 직전에 ALAC/M4A를 낚아챕니다!
@@ -589,6 +594,7 @@ public class AudioPlayerManager {
                 Object[] alacTags = extractAlacMetadata(track);
                 if (alacTags[0] != null) t = (String) alacTags[0];
                 if (alacTags[1] != null) a = (String) alacTags[1];
+                if (alacTags[2] != null) al = (String) alacTags[2];
                 if (alacTags[5] != null) main.lastAlbumArtBytes = (byte[]) alacTags[5];
 
                 // 🎯 대망의 가사 장착!
@@ -608,6 +614,7 @@ public class AudioPlayerManager {
                     a = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST);
                     // 🚀 [오디오북 태그 지원] 가수 태그가 없으면 '저자(AUTHOR)' 태그를 한 번 더 긁어옵니다!
                     if (a == null || a.isEmpty()) a = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_AUTHOR);
+                    al = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM);
 
                     main.lastAlbumArtBytes = mmr.getEmbeddedPicture();
                     fisMmr.close();
@@ -633,6 +640,7 @@ public class AudioPlayerManager {
             if (main.prefs.contains("meta_title_" + track.getAbsolutePath())) {
                 t = main.prefs.getString("meta_title_" + track.getAbsolutePath(), t);
                 a = main.prefs.getString("meta_artist_" + track.getAbsolutePath(), a);
+                al = main.prefs.getString("meta_album_" + track.getAbsolutePath(), al);
             }
 
             // 🚀 [폴더 이름 강제 수혈 엔진] 태그가 텅 비었을 때, 폴더 이름을 가수/책 이름으로 띄워줍니다!
@@ -654,6 +662,20 @@ public class AudioPlayerManager {
 
             if (a != null && !a.trim().isEmpty()) main.tvPlayerArtist.setText(a);
             else main.tvPlayerArtist.setText(track.getAbsolutePath().contains("/Audiobooks") || main.isAudiobookLibraryMode ? "Unknown Author" : "Unknown Artist");
+
+            if (main.tvPlayerAlbum != null) {
+                if (al != null && !al.trim().isEmpty()) main.tvPlayerAlbum.setText(al);
+                else {
+                    String albumFallback = track.getAbsolutePath().contains("/Audiobooks") || main.isAudiobookLibraryMode ? "Unknown Book" : "Unknown Album";
+                    try {
+                        String folderName = track.getParentFile().getName();
+                        if (folderName != null && !folderName.equals("Music") && !folderName.equals("Audiobooks") && !folderName.equals("sdcard0") && !folderName.equals("Y1_Playlists")) {
+                            albumFallback = folderName;
+                        }
+                    } catch (Exception e) {}
+                    main.tvPlayerAlbum.setText(albumFallback);
+                }
+            }
 
 
             // 🚀 동기식 렌더링으로 번쩍거림 없이 100% 매끄럽게 넘어갑니다.
@@ -681,6 +703,7 @@ public class AudioPlayerManager {
                         main.ivPlayerBgBlur.setImageBitmap(null);
                         sourceBg.recycle();
                     }
+                    main.updatePlayerBgOverlayVisibility();
 
 
                     try {
@@ -722,6 +745,7 @@ public class AudioPlayerManager {
                     } else {
                         main.ivPlayerBgBlur.setImageBitmap(null);
                     }
+                    main.updatePlayerBgOverlayVisibility();
 
                     try {
                         int centerX = bmp.getWidth() / 2;

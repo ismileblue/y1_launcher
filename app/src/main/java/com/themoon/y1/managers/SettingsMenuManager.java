@@ -522,6 +522,7 @@ public class SettingsMenuManager {
         if (settingsGroup != null && settingsGroup.getChildCount() > 0 && settingsGroup.getChildAt(0) instanceof TextView) {
             TextView header = (TextView) settingsGroup.getChildAt(0);
             header.setVisibility(View.VISIBLE);
+            header.setTextColor(ThemeManager.getTextColorPrimary());
             if (subCategory == null) {
                 header.setText(t("Settings"));
             } else {
@@ -813,17 +814,34 @@ public class SettingsMenuManager {
         final android.widget.SeekBar seekBar = new android.widget.SeekBar(main);
         seekBar.setMax(max);
         seekBar.setProgress(progress);
-        seekBar.setPadding(0, (int)(15*d), 0, (int)(5*d));
+        // 💡 0이나 최대값(255)에서 동그란 썸(Thumb)이 잘리지 않도록 좌우 패딩을 18dp로 여유있게 설정!
+        seekBar.setPadding((int)(18*d), (int)(15*d), (int)(18*d), (int)(5*d));
         seekBar.setFocusable(false); // 💡 슬라이더 자체는 포커스를 받지 않음 (부모 row가 다 통제함)
 
-        // 🚀 테마 색상으로 슬라이더 도색!
-        int themeColor = ThemeManager.getListButtonFocusedBg() | 0xFF000000;
-        try {
-            seekBar.getProgressDrawable().setColorFilter(themeColor, android.graphics.PorterDuff.Mode.SRC_IN);
-            if (android.os.Build.VERSION.SDK_INT >= 16) {
-                seekBar.getThumb().setColorFilter(themeColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        // 🚀 슬라이더 바 색상 실시간 적응 엔진 (포커스/편집 상태에 따라 동적 변경)
+        final Runnable updateSliderColor = new Runnable() {
+            @Override
+            public void run() {
+                int color;
+                if (isEditing[0]) {
+                    color = 0xFFFF8800; // ✏️ 편집 모드: 주황색 하이라이트!
+                } else if (row.hasFocus()) {
+                    // 🚀 선택(포커스) 시 포커스 배경색과 겹쳐 안보이는 문제 해결을 위해 고대비 선택 글자색 적용!
+                    color = ThemeManager.getListButtonFocusedTextColor();
+                    if (color == 0) color = 0xFFFFFFFF; // 안전장치
+                } else {
+                    // 평소 (비선택) 상태: 테마 강조색
+                    color = ThemeManager.getListButtonFocusedBg() | 0xFF000000;
+                }
+                try {
+                    seekBar.getProgressDrawable().setColorFilter(color, android.graphics.PorterDuff.Mode.SRC_IN);
+                    if (android.os.Build.VERSION.SDK_INT >= 16) {
+                        seekBar.getThumb().setColorFilter(color, android.graphics.PorterDuff.Mode.SRC_IN);
+                    }
+                } catch (Exception e) {}
             }
-        } catch (Exception e) {}
+        };
+        updateSliderColor.run();
 
         seekBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -854,6 +872,7 @@ public class SettingsMenuManager {
                     tvVal.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     tvTitle.setText(titleText);
                 }
+                updateSliderColor.run(); // 💡 편집 모드 전환 시 슬라이더 바 색상도 변경!
             }
         });
 
@@ -873,6 +892,7 @@ public class SettingsMenuManager {
                     tvTitle.setTextColor(ThemeManager.getTextColorPrimary());
                     tvVal.setTextColor(ThemeManager.getTextColorSecondary());
                 }
+                updateSliderColor.run(); // 💡 포커스 변경 시 슬라이더 바 색상 자동 대비 변환!
             }
         });
 

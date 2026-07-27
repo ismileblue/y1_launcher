@@ -18,11 +18,12 @@ public class ThemeManager {
         public String iconNormal, iconFocused, previewImage;
         public String action, gravity;
         public int radius, focusIndex, textSize, textSecondarySize;
-        public String textPosition, textAlign, bgColor;
+        public String textPosition, textAlign;
+        public String bgColor;
         public int padding;
         public int focusOffsetX, focusOffsetY;
         public float focusScale;
-
+        public String progressBgColor = "";
         // 🚀 생성자 파라미터 맨 끝 쪽에 String liveWidget 을 추가합니다!
         public MenuElement(String id, String type, String parentId, String visibleOnFocus, int x, int y, int width, int height,
                            String textNormal, String textFocused, String textRight,
@@ -30,6 +31,17 @@ public class ThemeManager {
                            String iconNormal, String iconFocused, String previewImage, String action,
                            String gravity, int radius, int focusIndex, int textSize, int textSecondarySize,
                            String textPosition, String textAlign, String bgColor, int padding, int focusOffsetX, int focusOffsetY, float focusScale) {
+            this(id, type, parentId, visibleOnFocus, x, y, width, height, textNormal, textFocused, textRight,
+                 textRightColor, textRightFocusedColor, iconNormal, iconFocused, previewImage, action,
+                 gravity, radius, focusIndex, textSize, textSecondarySize, textPosition, textAlign, bgColor, "", padding, focusOffsetX, focusOffsetY, focusScale);
+        }
+
+        public MenuElement(String id, String type, String parentId, String visibleOnFocus, int x, int y, int width, int height,
+                           String textNormal, String textFocused, String textRight,
+                           String textRightColor, String textRightFocusedColor,
+                           String iconNormal, String iconFocused, String previewImage, String action,
+                           String gravity, int radius, int focusIndex, int textSize, int textSecondarySize,
+                           String textPosition, String textAlign, String bgColor, String progressBgColor, int padding, int focusOffsetX, int focusOffsetY, float focusScale) {
             this.id = id; this.type = type; this.parentId = parentId;
             this.visibleOnFocus = visibleOnFocus; // 🚀 매핑 완료
             this.x = x; this.y = y;
@@ -40,6 +52,7 @@ public class ThemeManager {
             this.action = action; this.gravity = gravity; this.radius = radius;
             this.focusIndex = focusIndex; this.textSize = textSize; this.textSecondarySize = textSecondarySize;
             this.textPosition = textPosition; this.textAlign = textAlign; this.bgColor = bgColor;
+            this.progressBgColor = progressBgColor;
             this.padding = padding;
             this.focusOffsetX = focusOffsetX; this.focusOffsetY = focusOffsetY;
             this.focusScale = focusScale;
@@ -318,6 +331,7 @@ public class ThemeManager {
                                             el.optString("text_position", "bottom"),
                                             el.optString("text_align", "center"),
                                             el.optString("bg_color", ""),
+                                            el.optString("progress_bg_color", el.optString("bg_color_secondary", el.optString("track_color", ""))),
                                             el.optInt("padding", 0),
                                             el.optInt("focus_offset_x", 0),
                                             el.optInt("focus_offset_y", 0),
