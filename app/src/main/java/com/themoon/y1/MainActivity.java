@@ -183,6 +183,32 @@ public class MainActivity extends Activity {
     private java.util.concurrent.ExecutorService thumbnailExecutor = java.util.concurrent.Executors
             .newSingleThreadExecutor();
 
+    // 🚀 [메모리 엔진] 앨범 아트 로딩용 스레드 풀 (메모리 폭발 방지 및 동시 로딩 제한)
+    private java.util.concurrent.ExecutorService coverFlowExecutor = java.util.concurrent.Executors.newFixedThreadPool(3);
+
+    // 🚀 [메모리 엔진] OOM 방지용 이미지 리사이징 헬퍼
+    private Bitmap decodeSampledBitmap(String path, int reqWidth, int reqHeight) {
+        try {
+            final BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, options);
+            options.inSampleSize = 1;
+            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
+                final int halfHeight = options.outHeight / 2;
+                final int halfWidth = options.outWidth / 2;
+                while ((halfHeight / options.inSampleSize) >= reqHeight && (halfWidth / options.inSampleSize) >= reqWidth) {
+                    options.inSampleSize *= 2;
+                }
+            }
+            options.inJustDecodeBounds = false;
+            return BitmapFactory.decodeFile(path, options);
+        } catch (OutOfMemoryError e) {
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // 🚀 [통합 엔진] 라디오와 음악 플레이어 중 누가 켜져 있든 상태바(ivStatusPlay)를 완벽하게 동기화합니다!
     public void updateGlobalStatusPlayIcon() {
         runOnUiThread(new Runnable() {
@@ -203,17 +229,17 @@ public class MainActivity extends Activity {
                         activePlayer = 1; // 💡 라디오가 켜져 있으면 제어권은 라디오!
                     }
 
-                    if (ivStatusPlay != null) {
+                    if (tvStatusPlay != null) {
                         if (fm.isPowerUp || am.isPlaying()) {
-                            ivStatusPlay.setVisibility(View.VISIBLE);
-                            ivStatusPlay.setImageResource(android.R.drawable.ic_media_play);
+                            tvStatusPlay.setVisibility(View.VISIBLE);
+                            tvStatusPlay.setText("▶"); // 💡 재생 기호
                         } else {
                             // 둘 다 꺼져있을 때
                             if (currentPlaylist.isEmpty() && activePlayer == 0) {
-                                ivStatusPlay.setVisibility(View.GONE);
+                                tvStatusPlay.setVisibility(View.GONE);
                             } else {
-                                ivStatusPlay.setVisibility(View.VISIBLE);
-                                ivStatusPlay.setImageResource(android.R.drawable.ic_media_pause);
+                                tvStatusPlay.setVisibility(View.VISIBLE);
+                                tvStatusPlay.setText("❚❚"); // 💡 정지(일시정지) 기호 (알파벳이나 파이프 기호 2개)
                             }
                         }
                     }
@@ -350,6 +376,7 @@ public class MainActivity extends Activity {
     private static final int BROWSER_ARTISTS = 2;
     private static final int BROWSER_ALBUMS = 3;
     public static final int BROWSER_VIRTUAL_SONGS = 4;
+    private static final int BROWSER_GAMES = 10;
     // 💡 [추가] 손상되어 앱을 터뜨린 '독약 파일'들을 기억하는 블랙리스트
     private Set<String> blacklist = new HashSet<>();
     public int currentBrowserMode = BROWSER_ROOT;
@@ -360,7 +387,7 @@ public class MainActivity extends Activity {
     // 🚀 [팟캐스트 전용] 다운로드 고유 ID와 진행률(%)을 실시간으로 추적하는 지능형 메모장
     public java.util.HashMap<String, Long> activePodcastDownloads = new java.util.HashMap<>();
     public java.util.HashMap<String, Integer> podcastDownloadProgress = new java.util.HashMap<>();
-    private ImageView ivStatusPlay;
+    private TextView tvStatusPlay;
     private ImageView ivStatusServer; // 🚀 [신규 추가] 상태바 웹 서버 아이콘
 
     // 💡 미디어 라이브러리 브라우저 상태 관리 변수들 근처에 추가
@@ -511,7 +538,9 @@ public class MainActivity extends Activity {
     private boolean isScreenSleeping = false;
     private long lastScreenOnTime = 0;
     // 💡 [추가] 커스텀 배터리 뷰 변수
-    private BatteryIconView batteryIconView;
+    public BatteryIconView batteryIconView;
+    public int currentBatteryStyleIndex = 0;
+    public final String[] BATTERY_STYLE_NAMES = { "Icon Only", "Percent Only", "Icon + Percent" };
     public int currentTimeoutIndex = 1;
     public final int[] TIMEOUT_VALUES = { 15000, 30000, 60000, 300000 };
     public final String[] TIMEOUT_NAMES = { "15 Sec", "30 Sec", "1 Min", "5 Min" };
@@ -852,6 +881,27 @@ public class MainActivity extends Activity {
         }
     };
 
+    public void updateBatteryStatsMode() {
+        try {
+            int mode = com.themoon.y1.managers.BatteryStatsManager.MODE_OTHER;
+            
+            if (isScreenSleeping) {
+                mode = com.themoon.y1.managers.BatteryStatsManager.MODE_STANDBY;
+            } else {
+                com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager.getInstance(this);
+                com.themoon.y1.managers.AudioPlayerManager am = com.themoon.y1.managers.AudioPlayerManager.getInstance();
+                
+                if (fm != null && fm.isPowerUp) {
+                    mode = com.themoon.y1.managers.BatteryStatsManager.MODE_RADIO;
+                } else if (am != null && am.isPlaying()) {
+                    mode = com.themoon.y1.managers.BatteryStatsManager.MODE_MUSIC;
+                }
+            }
+            // VIDEO is handled by VideoPlayerActivity
+            com.themoon.y1.managers.BatteryStatsManager.getInstance(this).setMode(mode);
+        } catch (Exception e) {}
+    }
+
     private BroadcastReceiver systemStatusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -860,10 +910,12 @@ public class MainActivity extends Activity {
             if (Intent.ACTION_SCREEN_OFF.equals(action)) {
                 isScreenSleeping = true;
                 autoManageWifiPower(true); // 🚀 [절전 모드 진입]
+                updateBatteryStatsMode();
             } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
                 isScreenSleeping = false;
                 lastScreenOnTime = System.currentTimeMillis();
                 autoManageWifiPower(false); // 🚀 [절전 모드 해제]
+                updateBatteryStatsMode();
 
                 // =======================================================
                 // 🚀 [LCD 딥슬립 강제 기상 충격기]
@@ -899,18 +951,38 @@ public class MainActivity extends Activity {
             } else if (Intent.ACTION_BATTERY_CHANGED.equals(action)) {
                 int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
                 int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-
+                
+                int batteryPct = (int) ((level / (float) scale) * 100);
+                
                 // 🚀 [추가] 배터리 충전 상태 확인
                 int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
                 boolean isCharging = (status == BatteryManager.BATTERY_STATUS_CHARGING
                         || status == BatteryManager.BATTERY_STATUS_FULL);
+                
+                try {
+                    com.themoon.y1.managers.BatteryStatsManager bsm = com.themoon.y1.managers.BatteryStatsManager.getInstance(context);
+                    if (!isCharging) {
+                        bsm.onBatteryLevelChanged(batteryPct);
+                    } else {
+                        bsm.onPowerDisconnected(batteryPct); // When charging, it triggers reset inside if level is high
+                    }
+                } catch (Exception e) {}
 
-                int batteryPct = (int) ((level / (float) scale) * 100);
                 tvStatusBattery.setText(batteryPct + "%");
 
                 // 🚀 새로 만든 배터리 아이콘에 현재 용량과 충전 여부를 쏴줍니다!
                 if (batteryIconView != null) {
                     batteryIconView.setBatteryLevel(batteryPct, isCharging);
+                }
+                if (currentBatteryStyleIndex == 0) { // Icon Only
+                    if (batteryIconView != null) batteryIconView.setVisibility(android.view.View.VISIBLE);
+                    tvStatusBattery.setVisibility(android.view.View.GONE);
+                } else if (currentBatteryStyleIndex == 1) { // Percent Only
+                    if (batteryIconView != null) batteryIconView.setVisibility(android.view.View.GONE);
+                    tvStatusBattery.setVisibility(android.view.View.VISIBLE);
+                } else { // Icon + Percent
+                    if (batteryIconView != null) batteryIconView.setVisibility(android.view.View.VISIBLE);
+                    tvStatusBattery.setVisibility(android.view.View.VISIBLE);
                 }
                 if (widgetBatteryView != null) {
                     widgetBatteryView.setBatteryLevel(batteryPct, isCharging);
@@ -1331,6 +1403,7 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
         super.onCreate(savedInstanceState);
+        
         // 🚀 앱이 켜지면 자기 자신을 변수에 등록합니다.
         instance = this;
         // 🚀 [초고속 캐시 엔진 가동] 기기 최대 메모리의 1/8을 앨범 아트 전용 금고로 할당합니다!
@@ -1560,6 +1633,7 @@ public class MainActivity extends Activity {
         } // 🚀 [추가]
         try {
             currentTimeoutIndex = prefs.getInt("timeout_idx", 1);
+            currentBatteryStyleIndex = prefs.getInt("battery_indicator_style", 0);
         } catch (Exception e) {
         }
 
@@ -1827,6 +1901,7 @@ public class MainActivity extends Activity {
         tvStatusClock = findViewById(R.id.tv_status_clock);
         tvStatusBattery = findViewById(R.id.tv_status_battery);
         tvStatusClock.setShadowLayer(0, 0, 0, 0);
+        tvStatusBattery.setShadowLayer(0, 0, 0, 0);
         // 🚀 [여기에 새로 추가!] 기존 배터리 숫자(텍스트)를 숨기고 그 자리에 플랫 아이콘을 끼워 넣습니다.
         tvStatusBattery.setVisibility(View.GONE);
         batteryIconView = new BatteryIconView(this);
@@ -1843,24 +1918,24 @@ public class MainActivity extends Activity {
         ivStatusBluetooth = findViewById(R.id.iv_status_bluetooth);
         ivStatusWifi = findViewById(R.id.iv_status_wifi);
         ivStatusHeadphone = findViewById(R.id.iv_status_headphone);
-        // 🚀🚀🚀 [수정 완료] 재생 아이콘을 시계 쪽이 아닌, 우측 시스템 아이콘 그룹에 합류시킵니다! 🚀🚀🚀
-        ivStatusPlay = new ImageView(this);
-        ivStatusPlay.setImageResource(android.R.drawable.ic_media_play);
-        ivStatusPlay.setColorFilter(0xFFFFFFFF);
-        ivStatusPlay.setVisibility(View.GONE);
+        // 🚀🚀🚀 [수정 완료] 복잡한 폰트 파일 대신 100% 호환되는 직관적 텍스트 기호 사용! 🚀🚀🚀
+        tvStatusPlay = new TextView(this);
+        tvStatusPlay.setTypeface(null, Typeface.BOLD); // 기본 폰트를 아주 굵게!
+        tvStatusPlay.setText("▶"); // ▶ 직관적인 재생 텍스트 기호
+        tvStatusPlay.setTextSize(16f); // 기호에 맞게 크기 살짝 조정
+        tvStatusPlay.setTextColor(0xFFFFFFFF);
+        tvStatusPlay.setGravity(Gravity.CENTER);
+        tvStatusPlay.setVisibility(View.GONE);
 
-        // 1. 시계 부모가 아니라, 우측 블루투스/와이파이가 모여있는 'LinearLayout'을 콕 집어옵니다.
         ViewGroup rightStatusGroup = (ViewGroup) ivStatusBluetooth.getParent();
         float statusDensity = getResources().getDisplayMetrics().density;
 
-        // 2. 아이콘 크기를 우측 아이콘들과 완벽하게 동일한 22dp로 맞춥니다.
         LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
-                (int) (22 * statusDensity), (int) (22 * statusDensity));
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         playLp.gravity = Gravity.CENTER_VERTICAL;
-        playLp.setMargins(0, 0, (int) (8 * statusDensity), 0); // 우측 아이콘과의 간격 8dp
+        playLp.setMargins(0, 0, (int) (8 * statusDensity), 0);
 
-        // 3. 우측 아이콘 그룹의 맨 앞(인덱스 0)에 쏙 끼워 넣습니다!
-        rightStatusGroup.addView(ivStatusPlay, 0, playLp);
+        rightStatusGroup.addView(tvStatusPlay, 0, playLp);
 
         // 🚀 [신규 추가] 웹 서버 아이콘도 똑같이 22dp 크기로 빚어서 상태바 우측 그룹에 꽂아 넣습니다!
         ivStatusServer = new ImageView(this);
@@ -3138,7 +3213,8 @@ public class MainActivity extends Activity {
             if (tvKeyNnext != null) tvKeyNnext.setTextColor(ThemeManager.getTextColorSecondary());
 
             // 🚀 [추가] 상태바 우측 아이콘들을 테마 메인 글자색(primary)과 똑같이 도색합니다!
-            if (ivStatusPlay != null) ivStatusPlay.setColorFilter(primary);
+// 🚀 [수정] 색상 필터(setColorFilter) 대신 텍스트 컬러(setTextColor)로 변경!
+            if (tvStatusPlay != null) tvStatusPlay.setTextColor(primary);
             if (ivStatusServer != null) ivStatusServer.setColorFilter(primary);
             if (ivStatusHeadphone != null) ivStatusHeadphone.setColorFilter(primary);
 
@@ -3198,14 +3274,21 @@ public class MainActivity extends Activity {
                 }
             }
             if (volumeProgress != null) {
+                int volColor = themeFocusColor;
+                int r = (volColor >> 16) & 0xFF;
+                int g = (volColor >> 8) & 0xFF;
+                int b = volColor & 0xFF;
+                if ((r * 299 + g * 587 + b * 114) / 1000 < 80) {
+                    volColor = 0xFFFFFFFF; // 어두운 배경에서 안 보이는 것 방지
+                }
                 try {
                     android.graphics.drawable.LayerDrawable layer = (android.graphics.drawable.LayerDrawable) volumeProgress
                             .getProgressDrawable();
                     android.graphics.drawable.Drawable progress = layer.findDrawableByLayerId(android.R.id.progress);
                     if (progress != null)
-                        progress.setColorFilter(themeFocusColor, android.graphics.PorterDuff.Mode.SRC_IN);
+                        progress.setColorFilter(volColor, android.graphics.PorterDuff.Mode.SRC_IN);
                 } catch (Exception e) {
-                    volumeProgress.getProgressDrawable().setColorFilter(themeFocusColor,
+                    volumeProgress.getProgressDrawable().setColorFilter(volColor,
                             android.graphics.PorterDuff.Mode.SRC_IN);
                 }
             }
@@ -6648,6 +6731,16 @@ public class MainActivity extends Activity {
                     buildVirtualSongsForFavorites();
                 });
                 containerBrowserItems.addView(btnFav);
+
+                // 🎮 [몰래 숨겨놓은 게임 버튼 부활!]
+                View btnGame = createListButtonWithIcon("\uE338", t("Game"));
+                btnGame.setOnClickListener(v -> {
+                    clickFeedback();
+                    currentBrowserMode = BROWSER_GAMES;
+                    buildGameListUI();
+                });
+                containerBrowserItems.addView(btnGame);
+
                 // 🎧 오디오북 모드로 넘어가기 버튼
                 // Button btnAudiobook = createListButton("🎧 " + t("Switch to Audiobooks"));
                 View btnAudiobook = createListButtonWithIcon("\uE86D", t("Switch to Audiobooks"));
@@ -6790,7 +6883,7 @@ public class MainActivity extends Activity {
         // =======================================================
         // 🚀 [새 팟캐스트 검색 버튼 (휠 키보드 호출 버전)]
         // =======================================================
-        View btnSearch = createListButtonWithIcon("\uE8B6", t("Search New Podcasts"), 0xFF00FFFF);
+        View btnSearch = createListButtonWithIcon("\uE8B6", t("Search New Podcasts"));
         btnSearch.setOnClickListener(v -> {
             clickFeedback();
             currentKeyboardMode = 1; // 🚀 팟캐스트 검색 모드로 키보드 장전!
@@ -6798,7 +6891,7 @@ public class MainActivity extends Activity {
         });
         containerBrowserItems.addView(btnSearch);
 
-        View btnManage = createListButtonWithIcon("\uE872", t("Manage Subscriptions"), 0xFFFF5555); // 빨간색 휴지통
+        View btnManage = createListButtonWithIcon("\uE872", t("Manage Subscriptions")); // 빨간색 휴지통
         btnManage.setOnClickListener(v -> {
             clickFeedback();
             buildPodcastManageUI(); // 대망의 전용 삭제 스튜디오 오픈!
@@ -7591,6 +7684,33 @@ public class MainActivity extends Activity {
             }
         }).start();
     }
+    private void buildGameListUI() {
+        tvBrowserPath.setText(t("Games"));
+        
+        containerBrowserItems.removeAllViews();
+        
+        String[] games = new String[]{"2048", "BrickBreaker", "FlappyBird", "FreeCell", "SpaceShooter"};
+        for (final String game : games) {
+            View btn = createListButtonWithIcon("\uE338", game);
+            btn.setOnClickListener(v -> {
+                clickFeedback();
+                try {
+                    Intent intent = new Intent(MainActivity.this, GameActivity.class);
+                    intent.putExtra("game_url", "file:///android_asset/games/" + game + "/index.html");
+                    startActivity(intent);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+            containerBrowserItems.addView(btn);
+        }
+        
+        containerBrowserItems.post(() -> {
+            if (containerBrowserItems.getChildCount() > 0) {
+                containerBrowserItems.getChildAt(0).requestFocus();
+            }
+        });
+    }
 
     private void buildVirtualCategories(final String type) {
         if (isCustomScanning) {
@@ -7995,16 +8115,16 @@ public class MainActivity extends Activity {
         }
 
         // 3. 백그라운드 로딩 엔진 발사
-        new Thread(new Runnable() {
+        coverFlowExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 Bitmap bmp = null;
                 String cachedArtPath = prefs.getString("album_art_" + path, null);
 
-                if (cachedArtPath != null && new File(cachedArtPath).exists()) {
-                    bmp = BitmapFactory.decodeFile(cachedArtPath);
-                } else {
-                    try {
+                try {
+                    if (cachedArtPath != null && new File(cachedArtPath).exists()) {
+                        bmp = decodeSampledBitmap(cachedArtPath, 400, 400);
+                    } else {
                         String songName = item.file.getName();
                         int dot = songName.lastIndexOf(".");
                         if (dot > 0)
@@ -8013,16 +8133,19 @@ public class MainActivity extends Activity {
                         // 1순위: Y1_Covers 전용 폴더 검색
                         File fallbackFile = new File("/storage/sdcard0/Y1_Covers", songName + ".jpg");
                         if (fallbackFile.exists()) {
-                            bmp = BitmapFactory.decodeFile(fallbackFile.getAbsolutePath());
+                            bmp = decodeSampledBitmap(fallbackFile.getAbsolutePath(), 400, 400);
                         } else {
                             // 🚀 [신규 장착!] 2순위: 혹시 같은 폴더 안에 cover.jpg 가 있는지 탐색기 가동!
                             File folderCover = findFolderCover(item.file.getParentFile());
                             if (folderCover != null) {
-                                bmp = BitmapFactory.decodeFile(folderCover.getAbsolutePath());
+                                bmp = decodeSampledBitmap(folderCover.getAbsolutePath(), 400, 400);
                             }
                         }
-                    } catch (Exception e) {
                     }
+                } catch (OutOfMemoryError e) {
+                    bmp = null;
+                } catch (Exception e) {
+                    bmp = null;
                 }
 
                 if (bmp == null) {
@@ -8051,9 +8174,21 @@ public class MainActivity extends Activity {
                         // 🚀 빼온 사진 데이터(Byte)를 예쁜 비트맵(Bitmap)으로 구워냅니다.
                         if (embeddedArt != null) {
                             BitmapFactory.Options opts = new BitmapFactory.Options();
-                            opts.inSampleSize = 2;
+                            opts.inJustDecodeBounds = true;
+                            BitmapFactory.decodeByteArray(embeddedArt, 0, embeddedArt.length, opts);
+                            opts.inSampleSize = 1;
+                            if (opts.outHeight > 400 || opts.outWidth > 400) {
+                                final int halfHeight = opts.outHeight / 2;
+                                final int halfWidth = opts.outWidth / 2;
+                                while ((halfHeight / opts.inSampleSize) >= 400 && (halfWidth / opts.inSampleSize) >= 400) {
+                                    opts.inSampleSize *= 2;
+                                }
+                            }
+                            opts.inJustDecodeBounds = false;
                             bmp = BitmapFactory.decodeByteArray(embeddedArt, 0, embeddedArt.length, opts);
                         }
+                    } catch (OutOfMemoryError e) {
+                        bmp = null;
                     } catch (Exception e) {
                     }
                 }
@@ -8061,7 +8196,13 @@ public class MainActivity extends Activity {
                 final Bitmap finalBmp = bmp;
 
                 // 메인 스레드가 아닌, 이 백그라운드 공간에서 반사판을 생성하므로 성능 과부하가 0%입니다!
-                final Bitmap finalRef = getReflectionBitmap(finalBmp);
+                Bitmap tempRef = null;
+                try {
+                    tempRef = getReflectionBitmap(finalBmp);
+                } catch (OutOfMemoryError e) {
+                    tempRef = null;
+                }
+                final Bitmap finalRef = tempRef;
 
                 // 다음번 조회를 위해 원본과 반사 이미지 나란히 RAM 금고에 입고
                 if (finalBmp != null && albumArtCache != null) {
@@ -8091,7 +8232,7 @@ public class MainActivity extends Activity {
                     }
                 });
             }
-        }).start();
+        });
     }
 
     // 🚀 [버그 완전 처치 & 비율 최적화] 커버 이미지 잘림을 막으면서도 전체를 위로 올리고, 텍스트 가독성을 극대화합니다!
@@ -8805,16 +8946,17 @@ public class MainActivity extends Activity {
             // 🚀 [추가 4] 비디오 파일 버튼 렌더링 & 썸네일 이미지 변환!
             // =======================================================
             for (final File video : videoFiles) {
-                View b = createListButtonWithIcon("\uE04B", video.getName(), 0xFF00FFFF);
+                View b = createListButtonWithIcon("\uE04B", video.getName());
 
                 // 🚀 비디오 전용: 앞쪽 글자 아이콘(TextView)을 빼버리고, 썸네일 사진(ImageView)으로 교체 조립!
                 LinearLayout row = (LinearLayout) b;
                 TextView tvIcon = (TextView) row.getChildAt(0);
                 float d = getResources().getDisplayMetrics().density;
-                int iconSize = (int) (40 * d);
+                int iconWidth = (int) (80 * d);
+                int iconHeight = (int) (50 * d);
 
                 ImageView ivThumb = new ImageView(MainActivity.this);
-                LinearLayout.LayoutParams thumbLp = new LinearLayout.LayoutParams(iconSize, iconSize);
+                LinearLayout.LayoutParams thumbLp = new LinearLayout.LayoutParams(iconWidth, iconHeight);
                 thumbLp.rightMargin = ((LinearLayout.LayoutParams) tvIcon.getLayoutParams()).rightMargin;
                 ivThumb.setLayoutParams(thumbLp);
                 ivThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -10949,6 +11091,10 @@ public class MainActivity extends Activity {
                                     buildFileBrowserUI();
                                 }
                             }
+                        } else if (currentBrowserMode == BROWSER_GAMES) {
+                            currentBrowserMode = BROWSER_ROOT;
+                            lastBrowserFocusText = t("Game");
+                            buildFileBrowserUI();
                         } else if (currentBrowserMode == BROWSER_ARTISTS) {
                             currentBrowserMode = BROWSER_ROOT;
                             // 🚀 [오디오북 포커스 버그 수리]
@@ -11896,6 +12042,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        
         clockHandler.removeCallbacks(clockTask);
         progressHandler.removeCallbacks(updateProgressTask);
         volumeHandler.removeCallbacks(hideVolumeTask);
@@ -13084,7 +13231,7 @@ public class MainActivity extends Activity {
 
             TextView tvFreq = new TextView(this);
             tvFreq.setText(freq >= 1000 ? (freq / 1000) + "k" : freq + "");
-            tvFreq.setTextColor(0xFFFFFFFF);
+            tvFreq.setTextColor(ThemeManager.getTextColorPrimary());
             // 🚀 [수정 4] 글씨 크기를 시원하게 14.5f로 키우고, 굵은 글씨(BOLD)를 먹여 가독성을 극대화합니다!
             tvFreq.setTextSize(14.5f);
             tvFreq.setTypeface(null, Typeface.BOLD);

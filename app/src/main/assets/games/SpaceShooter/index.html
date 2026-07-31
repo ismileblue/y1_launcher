@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=480, height=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Y1 Space Shooter</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; touch-action: none; width: 480px; height: 360px; font-family: sans-serif; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        #exit-popup { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; z-index: 200; text-align: center; }
+        #exit-popup-inner { display: table-cell; vertical-align: middle; font-weight: bold; width: 100%; height: 100%; }
+        #exit-popup span { font-size: 36px; color: #FFFFFF; display: block; margin-bottom: 30px; text-shadow: 2px 2px 5px #000; }
+        .popup-btn { display: inline-block; padding: 12px 20px; margin: 0 10px; border-radius: 6px; font-size: 18px; font-weight: bold; background: #333; color: #AAA; border: 3px solid transparent; transition: all 0.2s; }
+        .selected-cancel { background: #555; color: #FFF; border: 3px solid #FFF; transform: scale(1.1); box-shadow: 0 0 15px #FFF; }
+        .selected-exit { background: #FF3333; color: #FFF; border: 3px solid #FF8888; box-shadow: 0 0 15px #FF0000; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div id="exit-popup">
+    <div id="exit-popup-inner">
+        <span>Exit Game?</span>
+        <div id="btn-cancel" class="popup-btn selected-cancel">CANCEL</div>
+        <div id="btn-exit" class="popup-btn">EXIT</div>
+    </div>
+</div>
+
+<script>
+    var canvas = document.getElementById("gameCanvas");
+    var ctx = canvas.getContext("2d");
+    canvas.width = 480;
+    canvas.height = 360;
+
+    var sprite = new Image();
+    sprite.src = 'sheet.png';
+
+    var sMap = {
+        player: {x: 211, y: 941, w: 99, h: 75},
+        fire: {x: 828, y: 206, w: 14, h: 31},
+        laser: {x: 856, y: 421, w: 9, h: 54},
+        meteor: {x: 224, y: 664, w: 101, h: 84},
+        enemy2: {x: 133, y: 412, w: 104, h: 84},
+        enemy3: {x: 222, y: 0, w: 103, h: 84},
+        ufo: {x: 444, y: 0, w: 91, h: 91}
+    };
+
+    var gameState = 0;
+    var score = 0;
+    var frames = 0;
+    var level = 1;
+    var enemiesDefeated = 0;
+    var targetEnemies = 10;
+
+    var lives = 3;
+
+    var savedBest = localStorage.getItem('y1_shooter_best');
+    var bestScore = savedBest ? parseInt(savedBest) : 0;
+
+    var stars = [];
+    for(var i=0; i<50; i++) {
+        stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: Math.random() * 2, speed: Math.random() * 2 + 0.5 });
+    }
+
+    var player = {
+        x: canvas.width / 2 - 25,
+        y: canvas.height - 70,
+        w: 50,
+        h: 38,
+        speed: 30,
+        invincible: 0,
+        draw: function() {
+            if (this.invincible > 0) {
+                this.invincible--;
+                if (frames % 6 < 3) return;
+            }
+
+            if (sprite.complete) {
+                ctx.drawImage(sprite, sMap.player.x, sMap.player.y, sMap.player.w, sMap.player.h, this.x, this.y, this.w, this.h);
+
+                if (frames % 10 < 5) {
+                    ctx.drawImage(sprite, sMap.fire.x, sMap.fire.y, sMap.fire.w, sMap.fire.h, this.x + this.w/2 - 7, this.y + this.h - 2, 14, 20);
+                }
+            } else {
+                ctx.fillStyle = "#00FFFF";
+                ctx.fillRect(this.x, this.y, this.w, this.h);
+            }
+        }
+    };
+
+    var bullets = [];
+    var enemies = [];
+
+    function shoot() {
+        bullets.push({ x: player.x + player.w/2 - 4, y: player.y - 10, w: 8, h: 25, speed: 10 });
+    }
+
+    function spawnEnemy() {
+        var size = Math.random() * 15 + 35;
+        var moveType = 0;
+
+        if (level >= 2 && Math.random() > 0.5) moveType = 1;
+        if (level >= 3 && Math.random() > 0.7) moveType = 2;
+        if (level >= 4 && Math.random() > 0.8) moveType = 3;
+
+        enemies.push({
+            x: Math.random() * (canvas.width - size),
+            y: -size,
+            w: size,
+            h: size * 0.8,
+            speed: (Math.random() * 2 + 1) + (level * 0.3),
+            moveType: moveType,
+            startX: 0,
+            angle: 0,
+            dx: (Math.random() > 0.5 ? 1 : -1) * (1 + level * 0.2)
+        });
+        enemies[enemies.length-1].startX = enemies[enemies.length-1].x;
+    }
+
+    function resetGame() {
+        player.x = canvas.width / 2 - 25;
+        player.invincible = 0;
+        bullets = [];
+        enemies = [];
+        score = 0;
+        level = 1;
+        lives = 3;
+        enemiesDefeated = 0;
+        targetEnemies = 10;
+        frames = 0;
+        gameState = 0;
+    }
+
+    function drawText(text, size, x, y, align, color) {
+        ctx.font = "bold " + size + "px sans-serif";
+        ctx.textAlign = align;
+        ctx.fillStyle = color || "#FFF";
+        ctx.fillText(text, x, y);
+    }
+
+    var isExitPopupShowing = false;
+    var exitSelection = 0;
+    function showExitPopup() { isExitPopupShowing = true; exitSelection = 0; document.getElementById('exit-popup').style.display = 'table'; updateExitUI(); }
+    function hideExitPopup() { isExitPopupShowing = false; document.getElementById('exit-popup').style.display = 'none'; }
+    function updateExitUI() {
+        document.getElementById('btn-cancel').className = exitSelection === 0 ? 'popup-btn selected-cancel' : 'popup-btn';
+        document.getElementById('btn-exit').className = exitSelection === 1 ? 'popup-btn selected-exit' : 'popup-btn';
+    }
+
+    function draw() {
+        if(isExitPopupShowing) { setTimeout(draw, 1000 / 60); return; }
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#FFF";
+        for(var i=0; i<stars.length; i++) {
+            var s = stars[i];
+            ctx.fillRect(s.x, s.y, s.size, s.size);
+            s.y += s.speed + (level * 0.2);
+            if(s.y > canvas.height) { s.y = 0; s.x = Math.random() * canvas.width; }
+        }
+
+        if (gameState === 1) {
+            frames++;
+
+            var spawnRate = Math.max(15, 40 - (level * 2));
+            if (frames % spawnRate === 0) spawnEnemy();
+
+            for (var i = 0; i < bullets.length; i++) {
+                var b = bullets[i];
+                b.y -= b.speed;
+
+                if (sprite.complete) {
+                    ctx.drawImage(sprite, sMap.laser.x, sMap.laser.y, sMap.laser.w, sMap.laser.h, b.x, b.y, b.w, b.h);
+                } else {
+                    ctx.fillStyle = "#FFFF00";
+                    ctx.fillRect(b.x, b.y, b.w, b.h);
+                }
+
+                if (b.y < -30) { bullets.splice(i, 1); i--; }
+            }
+
+            for (var i = 0; i < enemies.length; i++) {
+                var e = enemies[i];
+                e.y += e.speed;
+
+                if (e.moveType === 1) {
+                    e.angle += 0.05;
+                    e.x = e.startX + Math.sin(e.angle) * 60;
+                } else if (e.moveType === 2) {
+                    e.x += e.dx;
+                    if (e.x <= 0 || e.x + e.w >= canvas.width) e.dx *= -1;
+                } else if (e.moveType === 3) {
+                    if (e.x + e.w/2 < player.x + player.w/2) e.x += 1;
+                    else if (e.x + e.w/2 > player.x + player.w/2) e.x -= 1;
+                }
+
+                if (sprite.complete) {
+                    var eSprite = sMap.meteor;
+                    if (e.moveType === 1) eSprite = sMap.enemy2;
+                    else if (e.moveType === 2) eSprite = sMap.enemy3;
+                    else if (e.moveType === 3) eSprite = sMap.ufo;
+
+                    ctx.drawImage(sprite, eSprite.x, eSprite.y, eSprite.w, eSprite.h, e.x, e.y, e.w, e.h);
+                } else {
+                    ctx.fillStyle = "#FF5555";
+                    ctx.fillRect(e.x, e.y, e.w, e.h);
+                }
+
+                if (e.y > canvas.height) { enemies.splice(i, 1); i--; continue; }
+
+                if (player.invincible <= 0 && player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+                    lives--;
+                    enemies.splice(i, 1);
+                    i--;
+
+                    if (lives <= 0) {
+                        gameState = 2;
+                    } else {
+                        player.invincible = 60;
+                    }
+                    continue;
+                }
+
+                var hit = false;
+                for (var j = 0; j < bullets.length; j++) {
+                    var b = bullets[j];
+                    if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
+                        score += 10;
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            localStorage.setItem('y1_shooter_best', bestScore);
+                        }
+
+                        enemiesDefeated++;
+                        enemies.splice(i, 1);
+                        bullets.splice(j, 1);
+                        i--;
+                        hit = true;
+                        break;
+                    }
+                }
+
+                if (hit && enemiesDefeated >= targetEnemies) {
+                    gameState = 3;
+                    bullets = [];
+                    enemies = [];
+                    break;
+                }
+            }
+
+            player.draw();
+        }
+
+        if (gameState === 1 || gameState === 3 || gameState === 2) {
+            drawText("SCORE: " + score, 16, 10, 25, "left", "#FFF");
+            drawText("BEST: " + bestScore, 13, 10, 45, "left", "#FFD700");
+
+            drawText("STAGE: " + level, 18, canvas.width/2, 25, "center", "#00FFFF");
+
+            drawText("TARGET: " + enemiesDefeated + "/" + targetEnemies, 16, canvas.width - 10, 25, "right", "#FF5555");
+
+            var heartStr = "";
+            for(var l=0; l<lives; l++) heartStr += "❤️";
+            drawText("LIVES: " + heartStr, 14, canvas.width - 10, 45, "right", "#FFF");
+        }
+
+        if (gameState === 0) {
+            drawText("SPACE SHOOTER", 36, canvas.width/2, canvas.height/2 - 20, "center", "#00FFFF");
+            drawText("BEST SCORE: " + bestScore, 18, canvas.width/2, canvas.height/2 + 10, "center", "#FFD700");
+            drawText("Click PLAY to Start", 16, canvas.width/2, canvas.height/2 + 50, "center", "#AAA");
+            drawText("◀/▶ Wheel: Move   |   PLAY: Shoot", 14, canvas.width/2, canvas.height - 20, "center", "#777");
+        } else if (gameState === 2) {
+            drawText("GAME OVER", 40, canvas.width/2, canvas.height/2 - 10, "center", "#FF5555");
+            drawText("STAGE " + level + " | SCORE: " + score, 20, canvas.width/2, canvas.height/2 + 30, "center", "#FFF");
+            drawText("Click PLAY to Restart", 16, canvas.width/2, canvas.height/2 + 70, "center", "#AAA");
+        } else if (gameState === 3) {
+            drawText("STAGE " + level + " CLEAR!", 36, canvas.width/2, canvas.height/2 - 10, "center", "#00FF00");
+            drawText("Click PLAY for Next Stage", 18, canvas.width/2, canvas.height/2 + 30, "center", "#FFF");
+        }
+
+        // 🚀 핵심: 여기서 requestAnimationFrame을 구형 기기 호환용 setTimeout으로 교체!
+        setTimeout(draw, 1000 / 60);
+    }
+
+    function actionPress() {
+        if (gameState === 0) {
+            gameState = 1;
+        } else if (gameState === 1) {
+            shoot();
+        } else if (gameState === 2) {
+            resetGame();
+        } else if (gameState === 3) {
+            level++;
+            enemiesDefeated = 0;
+            targetEnemies = level * 10;
+            gameState = 1;
+        }
+    }
+
+    window.onDeviceKey = function(keyCode, action) {
+        var isDown = (action === 0);
+
+        if (isExitPopupShowing) {
+            if (isDown) {
+                if (keyCode === 88 || keyCode === 19 || keyCode === 21) { exitSelection = 0; updateExitUI(); }
+                else if (keyCode === 87 || keyCode === 20 || keyCode === 22) { exitSelection = 1; updateExitUI(); }
+                else if (keyCode === 23 || keyCode === 66 || keyCode === 85 || keyCode === 126 || keyCode === 127) {
+                    if (exitSelection === 1) { if(window.Y1App) Y1App.exitGame(); } else hideExitPopup();
+                }
+            }
+            return;
+        }
+
+        if (isDown) {
+            if (keyCode === 4) {
+                showExitPopup();
+            }
+            else if (keyCode === 23 || keyCode === 66 || keyCode === 85 || keyCode === 126 || keyCode === 127) {
+                actionPress();
+            }
+            else if (keyCode === 19 || keyCode === 88 || keyCode === 21) {
+                if(gameState === 1) { player.x -= player.speed; if(player.x < 0) player.x = 0; }
+            }
+            else if (keyCode === 20 || keyCode === 87 || keyCode === 22) {
+                if(gameState === 1) { player.x += player.speed; if(player.x + player.w > canvas.width) player.x = canvas.width - player.w; }
+            }
+        }
+    };
+
+    window.addEventListener("keydown", function(e) {
+        if (e.keyCode === 13 || e.keyCode === 32) {
+            actionPress();
+            e.preventDefault();
+        } else if (e.keyCode === 37) {
+            if(gameState === 1) { player.x -= player.speed; if(player.x < 0) player.x = 0; }
+        } else if (e.keyCode === 39) {
+            if(gameState === 1) { player.x += player.speed; if(player.x + player.w > canvas.width) player.x = canvas.width - player.w; }
+        }
+    });
+
+    window.addEventListener("mousedown", actionPress);
+    window.addEventListener("touchstart", actionPress);
+
+    // 루프 스타트
+    draw();
+</script>
+</body>
+</html>

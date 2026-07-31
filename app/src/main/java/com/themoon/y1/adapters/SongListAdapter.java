@@ -42,7 +42,7 @@ public class SongListAdapter extends BaseAdapter {
 
 
             // ==========================================
-            // 🚀 1. 팟캐스트 에피소드 모드 (시간 표시 및 로직 완벽 통합!)
+            // 🚀 1. 팟캐스트 에피소드 모드 (시각적 구분 디자인 대개조!)
             // ==========================================
             if (MainActivity.instance.currentBrowserMode == 14) {
                 String audioUrl = song.genre;
@@ -54,7 +54,7 @@ public class SongListAdapter extends BaseAdapter {
                 String safeTitle = song.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
                 java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
 
-                // ⏱ 저장된 시간 가져오기
+                // ⏱ 저장된 재생 위치 시간 가져오기
                 int savedPos = MainActivity.instance.prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
                 if (savedPos == 0) {
                     String streamKey = "/PODCAST_STREAM/" + safeChannel + "/" + safeTitle;
@@ -68,21 +68,26 @@ public class SongListAdapter extends BaseAdapter {
                     progressText = String.format(" [⏱ %02d:%02d]", min, sec);
                 }
 
-                // 타이틀 및 색상 결정
+                // 🚀 [디자인 대개조 핵심 구역]
                 if (MainActivity.instance.activePodcastDownloads.containsKey(audioUrl)) {
+                    // 1. ⏳ 현재 열심히 다운로드 받고 있는 중일 때 (진행률 표시)
                     int prog = 0;
                     if (MainActivity.instance.podcastDownloadProgress.containsKey(audioUrl)) {
                         prog = MainActivity.instance.podcastDownloadProgress.get(audioUrl);
                     }
-                    displayTitle = "⏳ [" + prog + "%] " +datePrefix +  song.title;
-                    customColor = 0xFFFF8800; // 오렌지색
+                    displayTitle = "⏳ [" + prog + "%] " + datePrefix + song.title;
+                    customColor = 0xFFFF8800; // 눈에 확 띄는 오렌지색 유지!
                 } else if (localFile.exists() && localFile.length() > 0) {
-                    displayTitle = "✔ " +datePrefix +  song.title + progressText;
-                    customColor = 0xFF00FF00; // 초록색
-                } else {
+                    // 2. 🎵 완벽하게 기기에 다운로드가 끝난 파일일 때!
+                    // 💡 요청사항 적용 완료: 귀찮은 체크마크(✔)를 싹 지우고 순수하게 텍스트만 표시합니다!
                     displayTitle = datePrefix + song.title + progressText;
+                    customColor = ThemeManager.getTextColorPrimary(); // 기본 테마 흰색(주 색상)으로 얌전하게!
+                } else {
+                    // 3. ☁️ 아직 안 받았고, 인터넷 연결해서 다운로드가 필요한 상태일 때!
+                    // 💡 요청사항 적용 완료: 제목 앞에 '클라우드(구름)' 아이콘을 붙이고 색상을 흐리게 해서 시각적으로 확 떨어트립니다.
+                    displayTitle = "☁️ " + datePrefix + song.title + progressText;
+                    customColor = ThemeManager.getTextColorSecondary(); // 약간 흐릿한 회색(보조 색상) 적용!
                 }
-
             }
             // ==========================================
             // 📅 2. '최근 추가된 곡' 모드일 때
@@ -281,6 +286,7 @@ public class SongListAdapter extends BaseAdapter {
 
         return btn;
     }
+
     // 🚀 [신규] 배경(Progress)과 포커스를 100% 동시 제어하는 무적의 하이브리드 리스너!
     private void applyDefaultFocusListener(final android.view.View btn, final String title, final int customColor, final int pos, final int dur) {
         final int normalColor = (customColor != 0) ? customColor : com.themoon.y1.ThemeManager.getTextColorPrimary();

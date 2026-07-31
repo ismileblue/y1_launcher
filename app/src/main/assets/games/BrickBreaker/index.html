@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=480, height=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Y1 Brick Breaker</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #111; overflow: hidden; touch-action: none; width: 480px; height: 360px; font-family: sans-serif; }
+        canvas { display: block; width: 100%; height: 100%; background: #222; box-shadow: inset 0 0 20px #000; }
+
+        #exit-popup { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; z-index: 200; text-align: center; }
+        #exit-popup-inner { display: table-cell; vertical-align: middle; font-weight: bold; width: 100%; height: 100%; }
+        #exit-popup span { font-size: 36px; color: #FFFFFF; display: block; margin-bottom: 30px; text-shadow: 2px 2px 5px #000; }
+        .popup-btn { display: inline-block; padding: 12px 20px; margin: 0 10px; border-radius: 6px; font-size: 18px; font-weight: bold; background: #333; color: #AAA; border: 3px solid transparent; transition: all 0.2s; }
+        .selected-cancel { background: #555; color: #FFF; border: 3px solid #FFF; transform: scale(1.1); box-shadow: 0 0 15px #FFF; }
+        .selected-exit { background: #FF3333; color: #FFF; border: 3px solid #FF8888; box-shadow: 0 0 15px #FF0000; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div id="exit-popup">
+    <div id="exit-popup-inner">
+        <span>Exit Game?</span>
+        <div id="btn-cancel" class="popup-btn selected-cancel">CANCEL</div>
+        <div id="btn-exit" class="popup-btn">EXIT</div>
+    </div>
+</div>
+
+<script>
+    var canvas = document.getElementById("gameCanvas");
+    var ctx = canvas.getContext("2d");
+
+    canvas.width = 480;
+    canvas.height = 360;
+
+    var gameState = 0;
+
+    var ballRadius = 6;
+    var x = canvas.width / 2;
+    var y = canvas.height - 30;
+    var baseSpeed = 4;
+    var dx = baseSpeed;
+    var dy = -baseSpeed;
+
+    var paddleHeight = 12;
+    var paddleWidth = 80;
+    var paddleX = (canvas.width - paddleWidth) / 2;
+    var paddleMoveStep = 35;
+
+    var brickRowCount = 3;
+    var brickColumnCount = 7;
+    var brickWidth = 54;
+    var brickHeight = 18;
+    var brickPadding = 10;
+    var brickOffsetTop = 40;
+    var brickOffsetLeft = 20;
+
+    var bricks = [];
+    var score = 0;
+    var lives = 3;
+    var currentLevel = 1;
+
+    var savedBest = localStorage.getItem('y1_brick_bestScore');
+    var bestScore = savedBest ? parseInt(savedBest) : 0;
+
+    function initBricks() {
+        brickRowCount = Math.min(2 + currentLevel, 7);
+        bricks = [];
+        for(var c = 0; c < brickColumnCount; c++) {
+            bricks[c] = [];
+            for(var r = 0; r < brickRowCount; r++) {
+                var colorList = ["#FF5555", "#FF9900", "#FFFF00", "#00FF00", "#00FFFF", "#0088FF", "#FF00FF"];
+                bricks[c][r] = { x: 0, y: 0, status: 1, color: colorList[r % colorList.length] };
+            }
+        }
+    }
+    initBricks();
+
+    function drawBall() {
+        ctx.beginPath();
+        ctx.arc(x, y, ballRadius, 0, Math.PI*2);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fill();
+        ctx.closePath();
+    }
+
+    function drawPaddle() {
+        ctx.beginPath();
+        ctx.rect(paddleX, canvas.height - paddleHeight - 10, paddleWidth, paddleHeight);
+        ctx.fillStyle = "#00BFFF";
+        ctx.fill();
+        ctx.strokeStyle = "#FFFFFF";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(paddleX, canvas.height - paddleHeight - 10, paddleWidth, paddleHeight);
+        ctx.closePath();
+    }
+
+    function drawBricks() {
+        for(var c = 0; c < brickColumnCount; c++) {
+            for(var r = 0; r < brickRowCount; r++) {
+                if(bricks[c][r].status === 1) {
+                    var brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
+                    var brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
+                    bricks[c][r].x = brickX;
+                    bricks[c][r].y = brickY;
+
+                    ctx.beginPath();
+                    ctx.rect(brickX, brickY, brickWidth, brickHeight);
+                    ctx.fillStyle = bricks[c][r].color;
+                    ctx.fill();
+
+                    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(brickX+1, brickY+1, brickWidth-2, brickHeight-2);
+                    ctx.closePath();
+                }
+            }
+        }
+    }
+
+    function drawUI() {
+        ctx.font = "bold 16px sans-serif";
+        ctx.fillStyle = "#FFFFFF";
+        ctx.textAlign = "left";
+        ctx.fillText("SCORE: " + score, 10, 25);
+        ctx.textAlign = "center";
+        ctx.fillText("STAGE: " + currentLevel, canvas.width / 2, 25);
+
+        var heartStr = "";
+        for(var i=0; i<lives; i++) heartStr += "❤️";
+        ctx.textAlign = "right";
+        ctx.fillText("LIVES: " + heartStr, canvas.width - 10, 25);
+    }
+
+    function drawTextCenter(text, size, yPos, color) {
+        ctx.font = "bold " + size + "px sans-serif";
+        ctx.fillStyle = color || "#FFFFFF";
+        ctx.textAlign = "center";
+        ctx.fillText(text, canvas.width/2, yPos);
+    }
+
+    function collisionDetection() {
+        var activeBricks = 0;
+        for(var c = 0; c < brickColumnCount; c++) {
+            for(var r = 0; r < brickRowCount; r++) {
+                var b = bricks[c][r];
+                if(b.status === 1) {
+                    activeBricks++;
+                    if(x > b.x && x < b.x + brickWidth && y > b.y && y < b.y + brickHeight) {
+                        dy = -dy;
+                        b.status = 0;
+                        score += 10;
+                        if (score > bestScore) {
+                            bestScore = score;
+                            localStorage.setItem('y1_brick_bestScore', bestScore);
+                        }
+                    }
+                }
+            }
+        }
+        if (activeBricks === 0 && gameState === 1) gameState = 2;
+    }
+
+    var isExitPopupShowing = false;
+    var exitSelection = 0;
+    function showExitPopup() { isExitPopupShowing = true; exitSelection = 0; document.getElementById('exit-popup').style.display = 'table'; updateExitUI(); }
+    function hideExitPopup() { isExitPopupShowing = false; document.getElementById('exit-popup').style.display = 'none'; }
+    function updateExitUI() {
+        document.getElementById('btn-cancel').className = exitSelection === 0 ? 'popup-btn selected-cancel' : 'popup-btn';
+        document.getElementById('btn-exit').className = exitSelection === 1 ? 'popup-btn selected-exit' : 'popup-btn';
+    }
+
+    function draw() {
+        // 🚀 패치: requestAnimationFrame 대신 구형 기기 호환 setTimeout 사용!
+        if(isExitPopupShowing) { setTimeout(draw, 1000 / 60); return; }
+
+        ctx.fillStyle = "rgba(34, 34, 34, 0.4)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawBricks();
+        drawPaddle();
+        drawBall();
+        drawUI();
+
+        if (gameState === 0) {
+            drawTextCenter("BRICK BREAKER", 36, canvas.height/2 - 20, "#00BFFF");
+            drawTextCenter("BEST SCORE: " + bestScore, 18, canvas.height/2 + 10, "#FFD700");
+            drawTextCenter("Click PLAY to Launch Ball", 16, canvas.height/2 + 50, "#AAAAAA");
+            drawTextCenter("◀/▶: Move Paddle   |   [BACK]: Exit", 14, canvas.height - 40, "#777777");
+        }
+        else if (gameState === 2) {
+            drawTextCenter("STAGE CLEAR!", 36, canvas.height/2 - 10, "#00FF00");
+            drawTextCenter("Click PLAY to Next Stage", 18, canvas.height/2 + 30, "#FFFFFF");
+        }
+        else if (gameState === 3) {
+            drawTextCenter("GAME OVER", 40, canvas.height/2 - 10, "#FF5555");
+            drawTextCenter("SCORE: " + score, 20, canvas.height/2 + 30, "#FFFFFF");
+            drawTextCenter("Click PLAY to Restart", 16, canvas.height/2 + 70, "#AAAAAA");
+        }
+        else if (gameState === 1) {
+            collisionDetection();
+
+            if(x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+                dx = -dx;
+            }
+            if(y + dy < ballRadius + 30) {
+                dy = -dy;
+            }
+            else if(y + dy > canvas.height - ballRadius - 10) {
+                if(x > paddleX && x < paddleX + paddleWidth && y < canvas.height) {
+                    dy = -dy;
+                    var hitPoint = x - (paddleX + paddleWidth/2);
+                    dx = hitPoint * 0.15;
+                }
+                else if (y > canvas.height) {
+                    lives--;
+                    if(!lives) {
+                        gameState = 3;
+                    } else {
+                        x = canvas.width / 2;
+                        y = canvas.height - 30;
+                        paddleX = (canvas.width - paddleWidth) / 2;
+                        dx = baseSpeed * (Math.random() > 0.5 ? 1 : -1);
+                        dy = -baseSpeed;
+                        gameState = 0;
+                    }
+                }
+            }
+
+            x += dx;
+            y += dy;
+        }
+
+        // 🚀 패치: 여기서도 무적의 setTimeout으로 엔진 교체!
+        setTimeout(draw, 1000 / 60);
+    }
+
+    function actionPress() {
+        if (gameState === 0) {
+            gameState = 1;
+        } else if (gameState === 2) {
+            currentLevel++;
+            baseSpeed += 0.5;
+            dx = baseSpeed * (Math.random() > 0.5 ? 1 : -1);
+            dy = -baseSpeed;
+            x = canvas.width / 2;
+            y = canvas.height - 30;
+            paddleX = (canvas.width - paddleWidth) / 2;
+            initBricks();
+            gameState = 0;
+        } else if (gameState === 3) {
+            score = 0;
+            lives = 3;
+            currentLevel = 1;
+            baseSpeed = 4;
+            dx = baseSpeed;
+            dy = -baseSpeed;
+            x = canvas.width / 2;
+            y = canvas.height - 30;
+            paddleX = (canvas.width - paddleWidth) / 2;
+            initBricks();
+            gameState = 0;
+        }
+    }
+
+    window.onDeviceKey = function(keyCode, action) {
+        var isDown = (action === 0);
+
+        if (isExitPopupShowing) {
+            if (isDown) {
+                if (keyCode === 88 || keyCode === 19 || keyCode === 21) {
+                    exitSelection = 0; updateExitUI();
+                }
+                else if (keyCode === 87 || keyCode === 20 || keyCode === 22) {
+                    exitSelection = 1; updateExitUI();
+                }
+                else if (keyCode === 23 || keyCode === 66 || keyCode === 85 || keyCode === 126 || keyCode === 127) {
+                    if (exitSelection === 1) {
+                        if(window.Y1App) Y1App.exitGame();
+                    } else {
+                        hideExitPopup();
+                    }
+                }
+            }
+            return;
+        }
+
+        if (isDown) {
+            if (keyCode === 4) {
+                showExitPopup();
+            }
+            else if (keyCode === 23 || keyCode === 66 || keyCode === 85 || keyCode === 126 || keyCode === 127) {
+                actionPress();
+            }
+            else if (keyCode === 19 || keyCode === 88 || keyCode === 21) {
+                if (gameState === 1 || gameState === 0) { paddleX -= paddleMoveStep; if (paddleX < 0) paddleX = 0; if (gameState === 0) x = paddleX + paddleWidth / 2; }
+            }
+            else if (keyCode === 20 || keyCode === 87 || keyCode === 22) {
+                if (gameState === 1 || gameState === 0) { paddleX += paddleMoveStep; if (paddleX + paddleWidth > canvas.width) paddleX = canvas.width - paddleWidth; if (gameState === 0) x = paddleX + paddleWidth / 2; }
+            }
+        }
+    };
+
+    window.addEventListener("keydown", function(e) {
+        if (e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 32) { actionPress(); e.preventDefault(); }
+        else if (e.keyCode === 37) {
+            if (gameState === 1 || gameState === 0) { paddleX -= paddleMoveStep; if (paddleX < 0) paddleX = 0; if (gameState === 0) x = paddleX + paddleWidth / 2; } e.preventDefault();
+        }
+        else if (e.keyCode === 39) {
+            if (gameState === 1 || gameState === 0) { paddleX += paddleMoveStep; if (paddleX + paddleWidth > canvas.width) paddleX = canvas.width - paddleWidth; if (gameState === 0) x = paddleX + paddleWidth / 2; } e.preventDefault();
+        }
+    });
+
+    window.addEventListener("mousedown", actionPress);
+    window.addEventListener("touchstart", actionPress);
+
+    draw();
+</script>
+</body>
+</html>

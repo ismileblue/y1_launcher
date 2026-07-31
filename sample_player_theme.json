@@ -1,0 +1,98 @@
+{
+  "name": "Custom Player Pro Theme Example",
+  "bg_image": "background.png",
+  "textPrimary": "#FFFFFF",
+  "textSecondary": "#B0B0B0",
+  "btnNormal": "#15FFFFFF",
+  "btnFocused": "#FF9800",
+  "btnFocusedText": "#000000",
+  "button_radius": 15,
+  "player_ui": [
+    {
+      "id": "album_art",
+      "type": "widget_focus_image",
+      "x": 65,
+      "y": 25,
+      "width": 190,
+      "height": 190,
+      "gravity": "top|left"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "x": 0,
+      "y": 225,
+      "width": 320,
+      "height": 30,
+      "text_size": 22,
+      "text_align": "center",
+      "bg_color": "#FFFFFF",
+      "gravity": "top|center"
+    },
+    {
+      "id": "artist",
+      "type": "text",
+      "x": 0,
+      "y": 258,
+      "width": 320,
+      "height": 22,
+      "text_size": 16,
+      "text_align": "center",
+      "bg_color": "#CCCCCC",
+      "gravity": "top|center"
+    },
+    {
+      "id": "album",
+      "type": "text",
+      "x": 0,
+      "y": 283,
+      "width": 320,
+      "height": 20,
+      "text_size": 14,
+      "text_align": "center",
+      "bg_color": "#FF9800",
+      "gravity": "top|center"
+    },
+    {
+      "id": "progress_bar",
+      "type": "progress",
+      "x": 20,
+      "y": 315,
+      "width": 280,
+      "height": 24,
+      "radius": 12,
+      "bg_color": "#FF9800",
+      "progress_bg_color": "#55000000",
+      "gravity": "top|left"
+    },
+    {
+      "id": "shuffle_icon",
+      "type": "icon",
+      "x": 20,
+      "y": 355,
+      "width": 28,
+      "height": 28,
+      "bg_color": "#FFFFFF",
+      "gravity": "top|left"
+    },
+    {
+      "id": "repeat_icon",
+      "type": "icon",
+      "x": 272,
+      "y": 355,
+      "width": 28,
+      "height": 28,
+      "bg_color": "#FFFFFF",
+      "gravity": "top|left"
+    },
+    {
+      "id": "quality_info",
+      "type": "box",
+      "x": 0,
+      "y": 355,
+      "width": -1,
+      "height": -1,
+      "gravity": "top|center"
+    }
+  ]
+}

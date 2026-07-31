@@ -58,6 +58,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".VideoPlayerActivity" android:screenOrientation="landscape" />
+        <activity android:name=".GameActivity" android:screenOrientation="landscape" />
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

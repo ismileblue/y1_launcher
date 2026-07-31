@@ -58,6 +58,18 @@ public class SettingsMenuManager {
         main.clickFeedback();
     }
 
+    private void clearSettingsUI() {
+        main.containerSettingsItems.removeAllViews();
+        // Remove any fixed UI injected before the ScrollView
+        ViewGroup layoutSettingsMode = (ViewGroup) main.layoutSettingsMode;
+        for (int i = layoutSettingsMode.getChildCount() - 1; i >= 0; i--) {
+            View child = layoutSettingsMode.getChildAt(i);
+            if ("battery_fixed".equals(child.getTag())) {
+                layoutSettingsMode.removeViewAt(i);
+            }
+        }
+    }
+
     public void buildSettingsUI() {
         main.currentSettingsDepth = 0;
         main.isRadioUIShowing = false;
@@ -65,7 +77,7 @@ public class SettingsMenuManager {
 
         updateSettingsTitle(null);
 
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
 
         // 🚀 스크롤을 최상단으로 리셋 (카테고리 목록은 짧으므로)
         android.view.ViewParent parent = main.containerSettingsItems.getParent();
@@ -111,7 +123,7 @@ public class SettingsMenuManager {
 
     public void buildAudioSettingsUI() {
         main.currentSettingsDepth = 1;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("Audio & Playback"));
 
         final LinearLayout btnShuffle = createSettingRow(t("Shuffle"), main.isShuffleMode ? t("ON") : t("OFF"));
@@ -198,7 +210,7 @@ public class SettingsMenuManager {
 
     public void buildDisplaySettingsUI() {
         main.currentSettingsDepth = 1;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("Display & Menu"));
 
 
@@ -244,6 +256,32 @@ public class SettingsMenuManager {
         main.containerSettingsItems.addView(btnFilterMenu);
 
         // (기존 코드) LinearLayout btnBrightMenu = createSettingRow(t("Display Brightness"), "〉 ");
+        final LinearLayout btnBatteryIndicator = createSettingRow(t("Battery Indicator"), t(main.BATTERY_STYLE_NAMES[main.currentBatteryStyleIndex]));
+        btnBatteryIndicator.setOnClickListener(new android.view.View.OnClickListener() {
+            @Override
+            public void onClick(android.view.View v) {
+                clickFeedback();
+                main.currentBatteryStyleIndex = (main.currentBatteryStyleIndex + 1) % main.BATTERY_STYLE_NAMES.length;
+                android.widget.TextView tvStatus = (android.widget.TextView) btnBatteryIndicator.getChildAt(1);
+                tvStatus.setText(t(main.BATTERY_STYLE_NAMES[main.currentBatteryStyleIndex]));
+                try {
+                    main.prefs.edit().putInt("battery_indicator_style", main.currentBatteryStyleIndex).commit();
+                    
+                    if (main.currentBatteryStyleIndex == 0) { // Icon Only
+                        if (main.batteryIconView != null) main.batteryIconView.setVisibility(android.view.View.VISIBLE);
+                        main.findViewById(com.themoon.y1.R.id.tv_status_battery).setVisibility(android.view.View.GONE);
+                    } else if (main.currentBatteryStyleIndex == 1) { // Percent Only
+                        if (main.batteryIconView != null) main.batteryIconView.setVisibility(android.view.View.GONE);
+                        main.findViewById(com.themoon.y1.R.id.tv_status_battery).setVisibility(android.view.View.VISIBLE);
+                    } else { // Icon + Percent
+                        if (main.batteryIconView != null) main.batteryIconView.setVisibility(android.view.View.VISIBLE);
+                        main.findViewById(com.themoon.y1.R.id.tv_status_battery).setVisibility(android.view.View.VISIBLE);
+                    }
+                } catch (Exception e) {}
+            }
+        });
+        main.containerSettingsItems.addView(btnBatteryIndicator);
+
         final LinearLayout btnTimeout = createSettingRow(t("Screen Timeout"), t(main.TIMEOUT_NAMES[main.currentTimeoutIndex]));
         btnTimeout.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -264,7 +302,7 @@ public class SettingsMenuManager {
 
     public void buildControlSettingsUI() {
         main.currentSettingsDepth = 1;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("Control & Feedback"));
 
         final LinearLayout btnSound = createSettingRow(t("Button Sound"), main.isSoundEffectEnabled ? t("ON") : t("OFF"));
@@ -328,7 +366,7 @@ public class SettingsMenuManager {
 
     public void buildNetworkSettingsUI() {
         main.currentSettingsDepth = 1;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("Network & Connections"));
 
         LinearLayout btnWifiMenu = createSettingRow(t("Wi-Fi"), "〉 ");
@@ -367,7 +405,7 @@ public class SettingsMenuManager {
 
     public void buildDataSettingsUI() {
         main.currentSettingsDepth = 1;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("Data & Storage"));
 
         LinearLayout btnStorageMenu = createSettingRow(t("Storage"), "〉 ");
@@ -426,7 +464,7 @@ public class SettingsMenuManager {
 
     public void buildSystemSettingsUI() {
         main.currentSettingsDepth = 1;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("System"));
 
         LinearLayout btnTime = createSettingRow(t("Date & Time"), "〉");
@@ -501,8 +539,156 @@ public class SettingsMenuManager {
             }
         });
         main.containerSettingsItems.addView(btnPowerOff);
+        LinearLayout btnBatteryTime = createSettingRow(t("Battery Time"), "〉 ");
+        btnBatteryTime.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                buildBatteryStatsUI();
+            }
+        });
+        main.containerSettingsItems.addView(btnBatteryTime);
+
         focusFirstItem();
     }
+
+    public void buildBatteryStatsUI() {
+        main.currentSettingsDepth = 2; // Inside System
+        clearSettingsUI();
+        updateSettingsTitle(t("Battery Time"));
+
+        com.themoon.y1.managers.BatteryStatsManager bsm = com.themoon.y1.managers.BatteryStatsManager.getInstance(main);
+
+        // Header: Last Charged Time
+        long lastReset = bsm.getLastResetTime();
+        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault());
+        TextView tvHeader = new TextView(main);
+        tvHeader.setTag("battery_fixed");
+        tvHeader.setText(t("Last Charged") + ": " + sdf.format(new java.util.Date(lastReset)));
+        tvHeader.setTextColor(com.themoon.y1.ThemeManager.getTextColorPrimary());
+        tvHeader.setTextSize(18f);
+        tvHeader.setPadding(20, 20, 20, 10);
+        ((ViewGroup) main.layoutSettingsMode).addView(tvHeader, 1);
+
+        // Graph Container
+        LinearLayout graphLayout = new LinearLayout(main);
+        graphLayout.setTag("battery_fixed");
+        graphLayout.setOrientation(LinearLayout.HORIZONTAL);
+        graphLayout.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 40));
+        graphLayout.setPadding(20, 0, 20, 20);
+
+        int dropM = bsm.getDrop(com.themoon.y1.managers.BatteryStatsManager.MODE_MUSIC);
+        int dropV = bsm.getDrop(com.themoon.y1.managers.BatteryStatsManager.MODE_VIDEO);
+        int dropR = bsm.getDrop(com.themoon.y1.managers.BatteryStatsManager.MODE_RADIO);
+        int dropG = bsm.getDrop(com.themoon.y1.managers.BatteryStatsManager.MODE_GAME);
+        int dropS = bsm.getDrop(com.themoon.y1.managers.BatteryStatsManager.MODE_STANDBY);
+        int dropO = bsm.getDrop(com.themoon.y1.managers.BatteryStatsManager.MODE_OTHER);
+        int totalDrop = dropM + dropV + dropR + dropG + dropS + dropO;
+        if (totalDrop == 0) totalDrop = 1; // Prevent div by zero
+
+        // Add Segments
+        addSegment(graphLayout, dropM, 0xFF42A5F5); // Music - Blue
+        addSegment(graphLayout, dropV, 0xFFEF5350); // Video - Red
+        addSegment(graphLayout, dropR, 0xFFFFA726); // Radio - Orange
+        addSegment(graphLayout, dropG, 0xFFAB47BC); // Game - Purple
+        addSegment(graphLayout, dropO, 0xFF26A69A); // Other - Teal
+        addSegment(graphLayout, dropS, 0xFF9E9E9E); // Standby - Gray
+
+        // If no usage, show empty gray bar
+        if (graphLayout.getChildCount() == 0) {
+            View segment = new View(main);
+            segment.setBackgroundColor(0xFF424242);
+            segment.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+            graphLayout.addView(segment);
+        }
+
+        ((ViewGroup) main.layoutSettingsMode).addView(graphLayout, 2);
+
+        // Details List
+        addDetail(main.containerSettingsItems, bsm, com.themoon.y1.managers.BatteryStatsManager.MODE_MUSIC);
+        addDetail(main.containerSettingsItems, bsm, com.themoon.y1.managers.BatteryStatsManager.MODE_VIDEO);
+        addDetail(main.containerSettingsItems, bsm, com.themoon.y1.managers.BatteryStatsManager.MODE_RADIO);
+        addDetail(main.containerSettingsItems, bsm, com.themoon.y1.managers.BatteryStatsManager.MODE_GAME);
+        addDetail(main.containerSettingsItems, bsm, com.themoon.y1.managers.BatteryStatsManager.MODE_OTHER);
+        addDetail(main.containerSettingsItems, bsm, com.themoon.y1.managers.BatteryStatsManager.MODE_STANDBY);
+
+        main.containerSettingsItems.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // 스크롤을 최상단으로 리셋
+                android.view.ViewParent parent = main.containerSettingsItems.getParent();
+                if (parent instanceof android.widget.ScrollView) {
+                    ((android.widget.ScrollView) parent).scrollTo(0, 0);
+                }
+                // Now that Header and Graph are out of containerSettingsItems, the first row is at index 0!
+                if (main.containerSettingsItems.getChildCount() > 0) {
+                    main.containerSettingsItems.getChildAt(0).requestFocus();
+                }
+            }
+        }, 50);
+    }
+
+    private void addSegment(LinearLayout graphLayout, int drop, int color) {
+        if (drop > 0) {
+            View segment = new View(main);
+            segment.setBackgroundColor(color);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, (float) drop);
+            segment.setLayoutParams(lp);
+            graphLayout.addView(segment);
+        }
+    }
+
+    private void addDetail(LinearLayout parent, com.themoon.y1.managers.BatteryStatsManager bsm, int mode) {
+        int drop = bsm.getDrop(mode);
+        long timeMs = bsm.getTime(mode);
+        String title = "";
+        int color = 0;
+        switch(mode) {
+            case com.themoon.y1.managers.BatteryStatsManager.MODE_MUSIC: title = t("Music"); color = 0xFF42A5F5; break;
+            case com.themoon.y1.managers.BatteryStatsManager.MODE_VIDEO: title = t("Video"); color = 0xFFEF5350; break;
+            case com.themoon.y1.managers.BatteryStatsManager.MODE_RADIO: title = t("Radio"); color = 0xFFFFA726; break;
+            case com.themoon.y1.managers.BatteryStatsManager.MODE_GAME: title = t("Game"); color = 0xFFAB47BC; break;
+            case com.themoon.y1.managers.BatteryStatsManager.MODE_OTHER: title = t("Other"); color = 0xFF26A69A; break;
+            case com.themoon.y1.managers.BatteryStatsManager.MODE_STANDBY: title = t("Standby"); color = 0xFF9E9E9E; break;
+        }
+        long hours = timeMs / 3600000;
+        long mins = (timeMs % 3600000) / 60000;
+        String timeStr = hours + "h " + mins + "m";
+        
+        LinearLayout row = createSettingRow(title, timeStr + " (" + drop + "%)");
+        
+        final TextView tvTitle = (TextView) row.getChildAt(0);
+        final TextView tvRight = (TextView) row.getChildAt(1);
+        
+        // Add a color dot
+        String dot = "● ";
+        android.text.SpannableString sp = new android.text.SpannableString(dot + title);
+        sp.setSpan(new android.text.style.ForegroundColorSpan(color), 0, dot.length(), android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tvTitle.setText(sp);
+        
+        // Overwrite focus listener to fix right text color
+        row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (hasFocus) {
+                    row.setBackground(main.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonFocusedBg()));
+                    tvTitle.setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
+                    tvRight.setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
+                } else {
+                    row.setBackground(main.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonNormalBg()));
+                    tvTitle.setTextColor(com.themoon.y1.ThemeManager.getTextColorPrimary());
+                    tvRight.setTextColor(com.themoon.y1.ThemeManager.getTextColorPrimary()); // ALWAYS PRIMARY
+                }
+            }
+        });
+        
+        // Trigger initial color
+        tvRight.setTextColor(com.themoon.y1.ThemeManager.getTextColorPrimary());
+        
+        row.setFocusable(true);
+        parent.addView(row);
+    }
+
 
     public void restoreSubMenu() {
         switch (lastSettingsFocusIndex) {
@@ -642,7 +828,7 @@ public class SettingsMenuManager {
     // =======================================================
     public void buildScreenFilterSettingsUI() {
         main.currentSettingsDepth = 2;
-        main.containerSettingsItems.removeAllViews();
+        clearSettingsUI();
         updateSettingsTitle(t("Screen Filter"));
 
         final boolean[] isEnabled = {main.prefs.getBoolean("filter_enabled", false)};
