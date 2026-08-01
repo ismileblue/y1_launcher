@@ -13826,7 +13826,7 @@ public class MainActivity extends Activity {
 
             return; // 🚨 에러가 나더라도 팟캐스트면 무조건 일반 플레이리스트에 등록되는 걸 차단합니다!
         }
-        final File playlistDir = new File("/storage/sdcard0/Y1_Playlists");
+      //  final File playlistDir = new File("/storage/sdcard0/Y1_Playlists");
         if (!playlistDir.exists())
             playlistDir.mkdirs();
 
