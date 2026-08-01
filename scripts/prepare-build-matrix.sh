@@ -96,10 +96,6 @@ def fetch_apk_releases(repo: str):
     for release in releases:
         if release.get("draft"):
             continue
-        # Skip our own Y2-only ROM packaging tags if they appear as releases with APKs.
-        tag = release.get("tag_name", "")
-        if tag.startswith("launcher-") and tag.endswith("-y2"):
-            continue
         apk_assets = [
             a for a in release.get("assets", [])
             if a.get("name", "").startswith("app-release") and a.get("name", "").endswith(".apk")
@@ -119,56 +115,29 @@ def fetch_apk_releases(repo: str):
         })
     return items
 
-
 y2_min_tuple = parse_semver(y2_min)
 if y2_min_tuple is None:
     raise SystemExit(f"invalid Y2_MIN_VERSION: {y2_min}")
 
-y1_items = fetch_apk_releases(y1_repo)
-y2_items = fetch_apk_releases(y2_repo)
+# Use y1_repo as the primary launcher repo
+items = fetch_apk_releases(y1_repo)
 
 # Each entry: launcher tag + rom types + release_tag (GitHub release name for the ROMs)
 catalog = []
 
-if is_upstream:
-    # Upstream: build a/b for all self tags; add y2 only for >= Y2_MIN.
-    for item in y2_items:  # self repo
-        ver = parse_semver(item["tag"])
-        if ver is None:
-            continue
-        types = ["a", "b"]
-        if ver >= y2_min_tuple:
-            types.append("y2")
-        entry = dict(item)
-        entry["types"] = types
-        entry["release_tag"] = f"launcher-{item['tag']}"
-        entry["include_y2"] = "y2" in types
-        entry["y2_only"] = False
-        catalog.append(entry)
-else:
-    # Fork: restore Y1 line from ismileblue (< Y2_MIN → a/b only).
-    for item in y1_items:
-        ver = parse_semver(item["tag"])
-        if ver is None or ver >= y2_min_tuple:
-            continue
-        entry = dict(item)
-        entry["types"] = ["a", "b"]
-        entry["release_tag"] = f"launcher-{item['tag']}"
-        entry["include_y2"] = False
-        entry["y2_only"] = False
-        catalog.append(entry)
-
-    # Fork: separate Y2 releases from this fork's APKs (>= Y2_MIN → y2 only).
-    for item in y2_items:
-        ver = parse_semver(item["tag"])
-        if ver is None or ver < y2_min_tuple:
-            continue
-        entry = dict(item)
-        entry["types"] = ["y2"]
-        entry["release_tag"] = f"launcher-{item['tag']}-y2"
-        entry["include_y2"] = True
-        entry["y2_only"] = True
-        catalog.append(entry)
+for item in items:
+    ver = parse_semver(item["tag"])
+    if ver is None:
+        continue
+    types = ["a", "b"]
+    if ver >= y2_min_tuple:
+        types.append("y2")
+    entry = dict(item)
+    entry["types"] = types
+    entry["release_tag"] = f"launcher-{item['tag']}"
+    entry["include_y2"] = "y2" in types
+    entry["y2_only"] = False
+    catalog.append(entry)
 
 catalog.sort(key=lambda i: i.get("published_at") or i["tag"])
 

@@ -163,7 +163,7 @@ jobs:
           ./scripts/format-release-notes.sh releases.json "${{ matrix.tag }}" > RELEASE_NOTES.md
 
       - name: Create Y1 release (a+b only)
-        if: ${{ matrix.include_a && matrix.include_b && !matrix.include_y2 && !matrix.y2_only }}
+        if: ${{ matrix.include_a && matrix.include_b && !matrix.include_y2 }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ matrix.release_tag }}
@@ -177,7 +177,7 @@ jobs:
           overwrite_files: true
 
       - name: Create upstream combined release (a+b+y2)
-        if: ${{ matrix.include_a && matrix.include_b && matrix.include_y2 && !matrix.y2_only }}
+        if: ${{ matrix.include_a && matrix.include_b && matrix.include_y2 }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ matrix.release_tag }}
@@ -186,19 +186,6 @@ jobs:
           files: |
             dist/type-a/rom.zip
             dist/type-b/rom_type_b.zip
-            dist/type-y2/rom_y2.zip
-          fail_on_unmatched_files: true
-          make_latest: ${{ matrix.tag == needs.check-upstream.outputs.latest_tag }}
-          overwrite_files: true
-
-      - name: Create fork Y2-only release
-        if: ${{ matrix.y2_only }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ matrix.release_tag }}
-          name: JJ Launcher Y2 ROM ${{ matrix.tag }}
-          body_path: RELEASE_NOTES.md
-          files: |
             dist/type-y2/rom_y2.zip
           fail_on_unmatched_files: true
           make_latest: ${{ matrix.tag == needs.check-upstream.outputs.latest_tag }}
