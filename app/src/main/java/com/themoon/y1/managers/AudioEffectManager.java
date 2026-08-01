@@ -1,5 +1,7 @@
 package com.themoon.y1.managers;
 
+import com.themoon.y1.StoragePaths;
+
 import android.content.SharedPreferences;
 import android.media.audiofx.Equalizer;
 import android.widget.Toast;
@@ -129,7 +131,7 @@ public class AudioEffectManager {
         MainActivity main = MainActivity.instance;
         if (main == null) return;
         try {
-            File file = new File("/storage/sdcard0/Y1_EQs/" + name + ".json");
+            File file = new File(StoragePaths.getEqDir(), name + ".json");
             if (file.exists()) {
                 file.delete();
             }
@@ -163,7 +165,7 @@ public class AudioEffectManager {
         MainActivity main = MainActivity.instance;
         if (main == null) return;
         try {
-            File folder = new File("/storage/sdcard0/Y1_EQs");
+            File folder = StoragePaths.getEqDir();
             if (!folder.exists()) folder.mkdirs();
             File file = new File(folder, name + ".json");
 
@@ -190,7 +192,7 @@ public class AudioEffectManager {
         MainActivity main = MainActivity.instance;
         if (main == null) return;
         try {
-            File folder = new File("/storage/sdcard0/Y1_EQs");
+            File folder = StoragePaths.getEqDir();
             if (!folder.exists()) { folder.mkdirs(); return; }
             File[] files = folder.listFiles();
 

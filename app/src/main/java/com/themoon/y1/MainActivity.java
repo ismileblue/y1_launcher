@@ -433,7 +433,7 @@ public class MainActivity extends Activity {
     public static List<SongItem> audiobookLibrary = new ArrayList<>(); // 🚀 오디오북 전용 바구니 신설!
     private boolean isCenterLongPressed = false;
     public boolean isAudiobookLibraryMode = false; // 🚀 현재 무슨 모드인지 기억하는 스위치
-    public File audiobookRootFolder = new File("/storage/sdcard0/Audiobooks"); // 🚀 오디오북 전용 루트 폴더
+    public File audiobookRootFolder = StoragePaths.getAudiobooksDir(); // 🚀 오디오북 전용 루트 폴더
     // 🚀 [추가] 내장 라디오 전용 지능형 조작 변수 뱅크
     // 🚀 [추가] 내장 라디오 전용 지능형 조작 변수 뱅크 (모달 UI 업그레이드!)
     public boolean isRadioUIShowing = false; // 현재 화면이 라디오인지 판별
@@ -509,8 +509,9 @@ public class MainActivity extends Activity {
     private boolean isTargetWifiOpen = false;
     // 💡 미디어 스캐너가 현재 작업 중인지 추적하는 변수
     private boolean isMediaScanning = false;
+    private com.themoon.y1.managers.ExternalSdMountMonitor externalSdMountMonitor;
     private AudioManager audioManager;
-    private File rootFolder = new File("/storage/sdcard0/Music");
+    private File rootFolder = StoragePaths.getMusicDir();
     private File currentFolder = rootFolder;
     public List<File> originalPlaylist = new ArrayList<File>();
     public List<File> currentPlaylist = new ArrayList<File>();
@@ -1428,7 +1429,7 @@ public class MainActivity extends Activity {
                     StringWriter sw = new StringWriter();
                     PrintWriter pw = new PrintWriter(sw);
                     e.printStackTrace(pw);
-                    File logFile = new File("/storage/sdcard0/y1_crash_log.txt");
+                    File logFile = StoragePaths.primaryFile("y1_crash_log.txt");
                     FileOutputStream fos = new FileOutputStream(logFile, true);
                     fos.write(("\n\n--- 💥 CRASH REPORT (" + new Date().toString() + ") ---\n").getBytes());
                     fos.write(sw.toString().getBytes());
@@ -1546,7 +1547,7 @@ public class MainActivity extends Activity {
         String savedLang = prefs.getString("app_language", "English (Default)");
         LanguageManager.getInstance(this).applyLanguage(savedLang);
         // 🚀 [테마 파일 동적 로드] 기기 내부의 폴더에서 테마 파일들을 읽어옵니다!
-        File themeFolder = new File("/storage/sdcard0/Y1_Themes");
+        File themeFolder = StoragePaths.getThemesDir();
 
         // 💡 테마 목록을 읽어오기 전, APK에 내장된 기본 제공 테마가 있다면 먼저 압축을 풀어 설치합니다!
         installBundledThemes();
@@ -1679,6 +1680,23 @@ public class MainActivity extends Activity {
                 startMediaLibraryScan(); // 만약 파일이 지워졌거나 깨졌으면 그때 스캔!
             }
         }
+
+        // Y2 MicroSD watchdog: remount /storage/sdcard1 when FUSE drops, then rescan.
+        externalSdMountMonitor = new com.themoon.y1.managers.ExternalSdMountMonitor(this);
+        externalSdMountMonitor.setListener(new com.themoon.y1.managers.ExternalSdMountMonitor.Listener() {
+            @Override
+            public void onSecondaryStorageReady() {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isCustomScanning)
+                            startMediaLibraryScan();
+                    }
+                });
+            }
+        });
+        externalSdMountMonitor.start();
+
         layoutMainMenu = findViewById(R.id.layout_main_menu);
         ivMainBg = findViewById(R.id.iv_main_bg);
         ivMenuPreview = findViewById(R.id.iv_menu_preview);
@@ -2606,10 +2624,12 @@ public class MainActivity extends Activity {
                                 String folderName = f.getParentFile().getName();
 
                                 if (parentName != null && !parentName.equals("Music")
-                                        && !parentName.equals("Audiobooks") && !parentName.equals("sdcard0")) {
+                                        && !parentName.equals("Audiobooks")
+                                        && !StoragePaths.isStorageVolumeName(parentName)) {
                                     artist = parentName;
                                 } else if (folderName != null && !folderName.equals("Music")
-                                        && !folderName.equals("Audiobooks") && !folderName.equals("sdcard0")) {
+                                        && !folderName.equals("Audiobooks")
+                                        && !StoragePaths.isStorageVolumeName(folderName)) {
                                     artist = folderName;
                                 }
                             } catch (Exception e) {
@@ -2621,7 +2641,7 @@ public class MainActivity extends Activity {
                         } else {
                             String folderName = f.getParentFile().getName();
                             if (folderName != null && !folderName.equals("Music") && !folderName.equals("Audiobooks")
-                                    && !folderName.equals("sdcard0")) {
+                                    && !StoragePaths.isStorageVolumeName(folderName)) {
                                 album = folderName;
                             }
                         }
@@ -2719,13 +2739,21 @@ public class MainActivity extends Activity {
                 totalAudioFiles = 0;
                 scannedAudioFiles = 0;
 
-                // 🚀 양쪽 폴더 모두 개수 세기 (진행률 표시용)
-                countAudioFiles(rootFolder);
-                countAudioFiles(audiobookRootFolder);
+                // Re-probe volumes so Y2 microSD (/storage/sdcard1) is included after insert.
+                StoragePaths.invalidate();
+                rootFolder = StoragePaths.getMusicDir();
+                audiobookRootFolder = StoragePaths.getAudiobooksDir();
 
-                // 🚀 [부분 스캔 2단계] 기존 명단을 들고 폴더를 뒤져서 '새로 들어온 파일'만 태그 파싱!
-                buildCustomLibrary(rootFolder, customLibrary, existingMusic);
-                buildCustomLibrary(audiobookRootFolder, audiobookLibrary, existingBooks);
+                // Count + scan Music/Audiobooks on every volume (sdcard0 + sdcard1).
+                for (java.io.File musicDir : StoragePaths.getMusicDirs())
+                    countAudioFiles(musicDir);
+                for (java.io.File bookDir : StoragePaths.getAudiobooksDirs())
+                    countAudioFiles(bookDir);
+
+                for (java.io.File musicDir : StoragePaths.getMusicDirs())
+                    buildCustomLibrary(musicDir, customLibrary, existingMusic);
+                for (java.io.File bookDir : StoragePaths.getAudiobooksDirs())
+                    buildCustomLibrary(bookDir, audiobookLibrary, existingBooks);
 
                 // 🚀 [신규 엔진 장착] 중복 폭탄 해체! 최고 음질 1개만 남기고 다 분쇄합니다!
                 filterDuplicateSongs(customLibrary);
@@ -3920,7 +3948,7 @@ public class MainActivity extends Activity {
     // 💡 [추가] 테마 리스트를 쫙 보여주고 사용자가 고를 수 있게 하는 전용 화면
     public void buildThemeSelectorUI() {
         currentSettingsDepth = 1; // 🚀 카테고리(0) → 서브 메뉴(1) → 이 화면(2)
-        File themeFolder = new File("/storage/sdcard0/Y1_Themes");
+        File themeFolder = StoragePaths.getThemesDir();
         ThemeManager.loadThemesFromStorage(themeFolder);
 
         containerSettingsItems.removeAllViews();
@@ -4464,7 +4492,7 @@ public class MainActivity extends Activity {
     // 💡 [수정] 스토리지 상세 정보 텍스트 적용 및 UI 크기/위치 최적화
     private void loadStorageUI() {
         try {
-            android.os.StatFs stat = new android.os.StatFs("/storage/sdcard0");
+            android.os.StatFs stat = new android.os.StatFs(StoragePaths.getPrimaryRoot().getAbsolutePath());
 
             // 🚀 기기 용량이 클 때 숫자가 폭발(오버플로우)해서 에러가 나는 것을 막기 위해 (long)으로 강제 변환!
             long blockSize = (long) stat.getBlockSize();
@@ -5801,6 +5829,7 @@ public class MainActivity extends Activity {
                 if (fmManager.isPowerUp) {
                     fmManager.powerDown();
                     isRadioAdjustingFreq = false;
+                    setVolumeControlStream(AudioManager.STREAM_MUSIC);
                 } else {
                     com.themoon.y1.managers.AudioPlayerManager am = com.themoon.y1.managers.AudioPlayerManager
                             .getInstance();
@@ -5810,9 +5839,10 @@ public class MainActivity extends Activity {
                         Thread.sleep(100);
                     } catch (Exception e) {
                     }
-                    if (fmManager.powerUp(fmManager.currentFreq))
+                    if (fmManager.powerUp(fmManager.currentFreq)) {
                         activePlayer = 1;
-                    else
+                        setVolumeControlStream(fmManager.getFmStreamType());
+                    } else
                         Toast.makeText(MainActivity.this, "Radio Error: " + fmManager.lastError,
                                 Toast.LENGTH_LONG).show();
                 }
@@ -5959,9 +5989,16 @@ public class MainActivity extends Activity {
             btnSpeaker.setOnClickListener(v -> {
                 clickFeedback();
                 fmManager.setSpeaker(!fmManager.isSpeakerOn);
+                setVolumeControlStream(fmManager.isPowerUp
+                        ? fmManager.getFmStreamType()
+                        : AudioManager.STREAM_MUSIC);
                 buildRadioUI();
             });
             containerSettingsItems.addView(btnSpeaker);
+
+            if (fmManager.isPowerUp) {
+                setVolumeControlStream(fmManager.getFmStreamType());
+            }
 
             containerSettingsItems.postDelayed(() -> {
                 int targetIdx = lastRadioFocusIndex;
@@ -6177,7 +6214,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 clickFeedback();
                 isPickingBackground = true;
-                currentFolder = new File("/storage/sdcard0");
+                currentFolder = StoragePaths.getPrimaryRoot();
                 changeScreen(STATE_BROWSER);
                 Toast.makeText(MainActivity.this, t("Select a JPG/PNG image"), Toast.LENGTH_SHORT).show();
             }
@@ -6715,9 +6752,8 @@ public class MainActivity extends Activity {
                     isVideoOpenedFromLibrary = true;
                     lastBrowserFocusText = "FROM_LIBRARY";
                     // SD카드의 비디오 전용 저장소나 전체 루트를 지정해 줍니다.
-                    currentFolder = new File("/storage/sdcard0/Videos");
-                    if (!currentFolder.exists())
-                        currentFolder.mkdirs();
+                    currentFolder = StoragePaths.getVideosDir();
+                    if (!currentFolder.exists()) currentFolder.mkdirs();
                     buildFileBrowserUI(); // 📁 폴더 탐색기 엔진 가동!
                 });
                 containerBrowserItems.addView(btnVideoBrowser);
@@ -6900,7 +6936,7 @@ public class MainActivity extends Activity {
 
         // =======================================================
         // 1. 팟캐스트 전용 폴더가 없으면 뚫어줍니다.
-        File podcastDir = new File("/storage/sdcard0/Podcasts");
+        File podcastDir = StoragePaths.getPodcastsDir();
         if (!podcastDir.exists())
             podcastDir.mkdirs();
 
@@ -7010,7 +7046,7 @@ public class MainActivity extends Activity {
         // 🚀 2. 다운로드 폴더도 채널별로 완벽 격리!
         String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
         String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
-        final File podcastDir = new File("/storage/sdcard0/Podcasts/" + safeChannel);
+        final File podcastDir = StoragePaths.getPodcastChannelDir(safeChannel);
         if (!podcastDir.exists())
             podcastDir.mkdirs();
         final File destFile = new File(podcastDir, safeTitle);
@@ -7278,7 +7314,7 @@ public class MainActivity extends Activity {
         // 🚀 1. 채널 이름으로 고유 폴더 경로를 생성합니다!
         String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
         String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
-        final File localFile = new File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
+        final File localFile = new File(StoragePaths.getPodcastChannelDir(safeChannel), safeTitle);
 
         // =======================================================
         // 🚀 [오프라인 클릭 방어막] 기기에 파일이 없는데 인터넷도 끊겨 있다면 아예 팝업을 열지 않고 경고 메시지를 띄웁니다!
@@ -7297,7 +7333,6 @@ public class MainActivity extends Activity {
                 return; // 💡 팝업을 그리지 않고 함수 즉시 탈출!
             }
         }
-
         // 1. 투명한 배경의 껍데기 다이얼로그 생성
         final android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -7587,7 +7622,7 @@ public class MainActivity extends Activity {
                     // =======================================================
                     if (!channelImageUrl.isEmpty()) {
                         String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
-                        File podcastDir = new File("/storage/sdcard0/Podcasts/" + safeChannel);
+                        File podcastDir = StoragePaths.getPodcastChannelDir(safeChannel);
                         if (!podcastDir.exists())
                             podcastDir.mkdirs();
 
@@ -7635,7 +7670,7 @@ public class MainActivity extends Activity {
                             episodes.addAll(loadPodcastCache(channelName));
 
                             String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
-                            File podcastDir = new File("/storage/sdcard0/Podcasts/" + safeChannel);
+                            File podcastDir = StoragePaths.getPodcastChannelDir(safeChannel);
 
                             // 🚀 [신규 장착 2] 만약 캐시 메모장조차 없다면(완전 최초 접속 실패 시),
                             // 최후의 수단으로 다운로드된 로컬 파일만이라도 긁어옵니다.
@@ -8131,7 +8166,7 @@ public class MainActivity extends Activity {
                             songName = songName.substring(0, dot);
 
                         // 1순위: Y1_Covers 전용 폴더 검색
-                        File fallbackFile = new File("/storage/sdcard0/Y1_Covers", songName + ".jpg");
+                        File fallbackFile = new File(StoragePaths.getCoversDir(), songName + ".jpg");
                         if (fallbackFile.exists()) {
                             bmp = decodeSampledBitmap(fallbackFile.getAbsolutePath(), 400, 400);
                         } else {
@@ -8764,24 +8799,7 @@ public class MainActivity extends Activity {
     }
     private void buildFolderBrowserUI() {
         containerBrowserItems.removeAllViews();
-        // =========================================================
-        // 🚀 [구조 완벽 통일] 뮤직/오디오북/팟캐스트처럼 비디오도 전용 번역 타이틀을 직접 부여합니다!
-        // =========================================================
-        if (currentBrowserMode == BROWSER_VIDEOS) {
-            if (currentFolder.getAbsolutePath().equals("/storage/sdcard0/Videos")) {
-                // 1. 비디오 최상단 폴더일 때 -> "Library: Video Browser" (언어팩 100% 적용)
-                tvBrowserPath.setText(t("Library") + ": " + t("Video Browser"));
-            } else {
-                // 2. 비디오 안의 하위 폴더로 들어갔을 때 -> "Library: Video Browser / 내폴더"
-                String subPath = currentFolder.getAbsolutePath().replace("/storage/sdcard0/Videos", "");
-                tvBrowserPath.setText(t("Library") + ": " + t("Video Browser") + subPath);
-            }
-        } else {
-            // 3. 비디오가 아닌 일반 폴더 탐색 모드일 때는 원래대로 Path 표시
-            tvBrowserPath.setText(t("Path") + ": " + currentFolder.getAbsolutePath().replace("/storage/sdcard0", ""));
-        }
-        // =========================================================
-
+        tvBrowserPath.setText(t("Path") + ": " + StoragePaths.toDisplayPath(currentFolder.getAbsolutePath()));
         File[] files = currentFolder.listFiles();
 
         if (files == null || files.length == 0) {
@@ -8797,9 +8815,9 @@ public class MainActivity extends Activity {
                     // 🚀 [수정할 부분] Movies 폴더나 Audiobooks 폴더가 텅 비어있어도 무사히 메인 화면으로 탈출하도록 방어막 추가!
                     // =======================================================
                     if (currentFolder.getAbsolutePath().equals(rootFolder.getAbsolutePath())
-                            || currentFolder.getAbsolutePath().equals("/storage/sdcard0")
-                            || currentFolder.getAbsolutePath().equals("/storage/sdcard0/Videos")
-                            || currentFolder.getAbsolutePath().equals("/storage/sdcard0/Audiobooks")) {
+                            || StoragePaths.isAnyStorageRoot(currentFolder.getAbsolutePath())
+                            || StoragePaths.isVideosRoot(currentFolder.getAbsolutePath())
+                            || StoragePaths.isAudiobooksRoot(currentFolder.getAbsolutePath())) {
 
                         if (isPickingBackground) {
                             isPickingBackground = false;
@@ -9889,7 +9907,7 @@ public class MainActivity extends Activity {
                         // 🚀🚀🚀 [여기서부터 새로 추가된 다이렉트 숏컷 액션들!] 🚀🚀🚀
                         case "OPEN_ROOT_FOLDER":
                             currentBrowserMode = BROWSER_FOLDER;
-                            currentFolder = new File("/storage/sdcard0"); // 최상위 루트 폴더로 강제 이동!
+                            currentFolder = StoragePaths.getPrimaryRoot(); // 최상위 루트 폴더로 강제 이동!
                             changeScreen(STATE_BROWSER);
                             break;
                         case "OPEN_PODCASTS":
@@ -9900,7 +9918,7 @@ public class MainActivity extends Activity {
                         case "OPEN_VIDEOS":
                             isVideoOpenedFromLibrary = false;
                             currentBrowserMode = BROWSER_VIDEOS;
-                            currentFolder = new File("/storage/sdcard0/Videos");
+                            currentFolder = StoragePaths.getVideosDir();
                             changeScreen(STATE_BROWSER);
                             break;
                         case "OPEN_WIFI":
@@ -10064,7 +10082,7 @@ public class MainActivity extends Activity {
 
             // 3. 백그라운드 설치 실행 (로그 기록 포함)
             os.writeBytes(
-                    "pm install -r " + apkFile.getAbsolutePath() + " > /storage/sdcard0/y1_update_log.txt 2>&1 \n");
+                    "pm install -r " + apkFile.getAbsolutePath() + " > " + StoragePaths.primaryFile("y1_update_log.txt").getAbsolutePath() + " 2>&1 \n");
 
             // 4. 설치가 끝날 때까지 넉넉하게 3초 대기 (이제 백그라운드 스레드라 화면이 안 멈춥니다!)
             os.writeBytes("sleep 3\n");
@@ -10613,37 +10631,50 @@ public class MainActivity extends Activity {
 
     // 🚀 [버그 원인 제거 완료] 여기에 있던 불필요한 잉여 중괄호 '}' 하나를 완벽하게 삭제했습니다!
     private void adjustVolume(boolean up) {
-        int currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
-        int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int stream = AudioManager.STREAM_MUSIC;
+        try {
+            com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager.getInstance(this);
+            if (fm.isPowerUp) {
+                // FM plays on STREAM_FM; MUSIC volume (esp. speaker device index) can be 0 on Y2.
+                stream = fm.getFmStreamType();
+            }
+        } catch (Exception e) {
+        }
+
+        int currentVol = audioManager.getStreamVolume(stream);
+        int maxVol = audioManager.getStreamMaxVolume(stream);
         if (up && currentVol < maxVol)
             currentVol++;
         else if (!up && currentVol > 0)
             currentVol--;
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, currentVol, 0);
+        audioManager.setStreamVolume(stream, currentVol, 0);
 
-        // 🚀 [버그 수리 완료] 라디오가 켜져 있다면, 미디어텍 라디오 전용 통로(STREAM_FM = 10)의 하드웨어 볼륨도 똑같이 깎아서
-        // 동기화합니다!
-        try {
-            com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager.getInstance(this);
-            if (fm.isPowerUp) {
-                int streamFm = 10;
-                try {
-                    streamFm = (Integer) AudioManager.class.getDeclaredField("STREAM_FM").get(null);
-                } catch (Exception e) {
-                }
-                int fmMax = audioManager.getStreamMaxVolume(streamFm);
-                int fmVol = (int) (((float) currentVol / maxVol) * fmMax);
-                audioManager.setStreamVolume(streamFm, fmVol, 0);
+        // Keep MUSIC in sync for UI/widgets when adjusting FM.
+        if (stream != AudioManager.STREAM_MUSIC) {
+            try {
+                int musicMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                int musicVol = (int) (((float) currentVol / Math.max(1, maxVol)) * musicMax);
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, musicVol, 0);
+            } catch (Exception e) {
             }
-        } catch (Exception e) {
         }
 
         showDynamicVolumeOverlay();
     }
 
     private void showDynamicVolumeOverlay() {
-        int currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int stream = AudioManager.STREAM_MUSIC;
+        try {
+            com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager.getInstance(this);
+            if (fm.isPowerUp) {
+                stream = fm.getFmStreamType();
+            }
+        } catch (Exception e) {
+        }
+        int currentVol = audioManager.getStreamVolume(stream);
+        int maxVol = audioManager.getStreamMaxVolume(stream);
         layoutVolumeOverlay.setVisibility(View.VISIBLE);
+        volumeProgress.setMax(maxVol);
         volumeProgress.setProgress(currentVol);
         volumeHandler.removeCallbacks(hideVolumeTask);
         volumeHandler.postDelayed(hideVolumeTask, 2000);
@@ -10989,10 +11020,10 @@ public class MainActivity extends Activity {
                 clickFeedback();
                 if (currentScreenState == STATE_BROWSER) {
                     if (isPickingBackground) {
-                        // 🚀 [최상단 방어막] 배경 화면 선택 시, 음악 폴더뿐만 아니라 SD카드 최상단(/storage/sdcard0)에서도 더 이상 못
+                        // 🚀 [최상단 방어막] 배경 화면 선택 시, 음악 폴더뿐만 아니라 SD카드 최상단에서도 더 이상 못
                         // 올라가게 막습니다!
                         if (currentFolder.getAbsolutePath().equals(rootFolder.getAbsolutePath())
-                                || currentFolder.getAbsolutePath().equals("/storage/sdcard0")) {
+                                || StoragePaths.isAnyStorageRoot(currentFolder.getAbsolutePath())) {
                             isPickingBackground = false;
                             changeScreen(STATE_SETTINGS); // 💡 엉뚱한 메인 메뉴가 아니라, 배경 화면 설정창으로 안전하게 복귀!
                             buildBackgroundSettingsUI();
@@ -11036,7 +11067,7 @@ public class MainActivity extends Activity {
                             }
 
                             // 모드별 최상위 폴더이거나 기기 전체 루트 폴더일 때 뒤로 가기를 누르면 라이브러리 메인(BROWSER_ROOT)으로 복귀!
-                            if (isAtFolderRoot || currentFolder.getAbsolutePath().equals("/storage/sdcard0")) {
+                            if (isAtFolderRoot || StoragePaths.isAnyStorageRoot(currentFolder.getAbsolutePath())) {
                                 currentBrowserMode = BROWSER_ROOT;
                                 lastBrowserFocusText = t("Folders");
                                 buildFileBrowserUI();
@@ -11198,8 +11229,8 @@ public class MainActivity extends Activity {
                             clickFeedback();
 
                             // 💡 1. 비디오 폴더 내에서 하위 폴더에 들어와 있다면? 상위 폴더로 한 칸 올라갑니다!
-                            if (!currentFolder.getAbsolutePath().equals("/storage/sdcard0/Videos") &&
-                                    !currentFolder.getAbsolutePath().equals("/storage/sdcard0")) {
+                            if (!StoragePaths.isVideosRoot(currentFolder.getAbsolutePath()) &&
+                                    !StoragePaths.isAnyStorageRoot(currentFolder.getAbsolutePath())) {
                                 lastBrowserFocusText = currentFolder.getName();
                                 currentFolder = currentFolder.getParentFile();
                                 buildFileBrowserUI();
@@ -12042,7 +12073,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        
+        if (externalSdMountMonitor != null) {
+            externalSdMountMonitor.stop();
+            externalSdMountMonitor = null;
+        }
         clockHandler.removeCallbacks(clockTask);
         progressHandler.removeCallbacks(updateProgressTask);
         volumeHandler.removeCallbacks(hideVolumeTask);
@@ -12549,7 +12583,7 @@ public class MainActivity extends Activity {
                         final Bitmap coverBitmap = BitmapFactory.decodeStream(in);
                         in.close();
 
-                        File coverFolder = new File("/storage/sdcard0/Y1_Covers");
+                        File coverFolder = StoragePaths.getCoversDir();
                         if (!coverFolder.exists())
                             coverFolder.mkdirs();
 
@@ -12711,7 +12745,7 @@ public class MainActivity extends Activity {
 
         // 💡 주의: 아래 경로는 현재 아티스트님의 LanguageManager가 파일을 읽어오는 폴더 경로로 맞춰주세요!
         // 보통 "/storage/sdcard0/Y1_Languages" 등으로 설정되어 있을 것입니다.
-        File targetDir = new File("/storage/sdcard0/Y1_Languages");
+        File targetDir = StoragePaths.getLanguagesDir();
         if (!targetDir.exists())
             targetDir.mkdirs();
 
@@ -12765,7 +12799,7 @@ public class MainActivity extends Activity {
         if (lastInstalledVersion >= currentAppVersion)
             return;
 
-        File targetDir = new File("/storage/sdcard0/Y1_Themes");
+        File targetDir = StoragePaths.getThemesDir();
         if (!targetDir.exists())
             targetDir.mkdirs();
 
@@ -13424,7 +13458,7 @@ public class MainActivity extends Activity {
         tvBrowserPath.setText(t("Library") + ": " + t("Playlists"));
 
         // 전용 재생목록 보관함 개설
-        File playlistDir = new File("/storage/sdcard0/Y1_Playlists");
+        File playlistDir = StoragePaths.getPlaylistsDir();
         if (!playlistDir.exists())
             playlistDir.mkdirs();
 
@@ -13745,7 +13779,7 @@ public class MainActivity extends Activity {
 
     // 🚀 [디자인 개조 및 휠 버그 완벽 해결]
     public void showAddToPlaylistDialog(final File songFile) {
-        // =======================================================
+        final File playlistDir = StoragePaths.getPlaylistsDir();        // =======================================================
         // 🚀 [팟캐스트 플레이리스트 납치 차단 방어막]
         // 물리 버튼 롱클릭 시 어댑터를 무시하고 여기로 다이렉트로 꽂히는 현상을 원천 차단합니다!
         // =======================================================
@@ -15294,7 +15328,7 @@ public class MainActivity extends Activity {
                 itemBtn.setOnClickListener(v -> {
                     clickFeedback();
                     try {
-                        File podcastDir = new File("/storage/sdcard0/Podcasts");
+                        File podcastDir = StoragePaths.getPodcastsDir();
                         if (!podcastDir.exists())
                             podcastDir.mkdirs();
                         File subFile = new File(podcastDir, "subscriptions.txt");
@@ -15348,7 +15382,7 @@ public class MainActivity extends Activity {
     // =======================================================
     private void removePodcastSubscription(String channelName, String targetRssUrl) {
         try {
-            File podcastDir = new File("/storage/sdcard0/Podcasts");
+            File podcastDir = StoragePaths.getPodcastsDir();
             File subFile = new File(podcastDir, "subscriptions.txt");
             if (!subFile.exists())
                 return;
@@ -15517,7 +15551,7 @@ public class MainActivity extends Activity {
         containerBrowserItems.addView(btnBack);
 
         // 메모장에서 채널 목록 읽어오기
-        File podcastDir = new File("/storage/sdcard0/Podcasts");
+        File podcastDir = StoragePaths.getPodcastsDir();
         File subFile = new File(podcastDir, "subscriptions.txt");
         List<String[]> channels = new ArrayList<>();
 

@@ -1,5 +1,7 @@
 package com.themoon.y1.adapters;
 
+import com.themoon.y1.StoragePaths;
+
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -52,7 +54,7 @@ public class SongListAdapter extends BaseAdapter {
 
                 String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
                 String safeTitle = song.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
-                java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
+                java.io.File localFile = new java.io.File(StoragePaths.getPodcastChannelDir(safeChannel), safeTitle);
 
                 // ⏱ 저장된 재생 위치 시간 가져오기
                 int savedPos = MainActivity.instance.prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
@@ -142,7 +144,8 @@ public class SongListAdapter extends BaseAdapter {
         if (MainActivity.instance.currentBrowserMode == 14) {
             String safeChannel = song.artist.replaceAll("[\\\\/:*?\"<>|]", "_");
             String safeTitle = song.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
-            java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
+            java.io.File localFile = new java.io.File(StoragePaths.getPodcastChannelDir(safeChannel), safeTitle);
+
             String streamKey = "/PODCAST_STREAM/" + safeChannel + "/" + safeTitle;
 
             pos = MainActivity.instance.prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
@@ -179,7 +182,7 @@ public class SongListAdapter extends BaseAdapter {
 
                     String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
                     String safeTitle = song.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
-                    java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
+                    java.io.File localFile = new java.io.File(StoragePaths.getPodcastChannelDir(safeChannel), safeTitle);
 
                     if (localFile.exists() && localFile.length() > 0) {
                         int savedPos = MainActivity.instance.prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
@@ -197,7 +200,7 @@ public class SongListAdapter extends BaseAdapter {
 
                         for (SongItem ep : items) {
                             String epTitle = ep.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
-                            java.io.File epFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, epTitle);
+                            java.io.File epFile = new java.io.File(StoragePaths.getPodcastChannelDir(safeChannel), epTitle);
 
                             // 파일이 기기에 실제로 존재할 때만 바구니에 합류!
                             if (epFile.exists() && epFile.length() > 0) {

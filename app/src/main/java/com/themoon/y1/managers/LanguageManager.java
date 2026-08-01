@@ -1,5 +1,7 @@
 package com.themoon.y1.managers;
 
+import com.themoon.y1.StoragePaths;
+
 import android.content.Context;
 import org.json.JSONObject;
 import java.io.File;
@@ -31,7 +33,7 @@ public class LanguageManager {
     // 1. 폴더에서 .json 언어팩 파일들을 스캔합니다.
     public void loadAvailableLanguages() {
         availableLangFiles.clear();
-        File langDir = new File("/storage/sdcard0/Y1_Languages");
+        File langDir = StoragePaths.getLanguagesDir();
         if (!langDir.exists()) langDir.mkdirs();
 
         File[] files = langDir.listFiles();
@@ -52,7 +54,7 @@ public class LanguageManager {
         if (fileName.equals("English (Default)")) return; // 기본값일 경우 빈 단어장 유지 (원본 출력)
 
         try {
-            File f = new File("/storage/sdcard0/Y1_Languages/" + fileName);
+            File f = new File(StoragePaths.getLanguagesDir(), fileName);
             if (f.exists()) {
                 FileInputStream fis = new FileInputStream(f);
                 byte[] data = new byte[(int) f.length()];

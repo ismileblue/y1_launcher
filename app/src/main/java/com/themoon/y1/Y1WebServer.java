@@ -20,7 +20,8 @@ public class Y1WebServer extends Thread {
 
     public Y1WebServer(Context context, File originalRootFolder) {
         this.context = context;
-        this.rootFolder = new File("/storage/sdcard0"); // 🚀 기기 전체 루트 폴더로 고정
+        // Y1: /storage/sdcard0. Y2 with readable SD: /storage (sdcard0 + sdcard1).
+        this.rootFolder = StoragePaths.getWebServerRoot();
     }
 
     public void run() {

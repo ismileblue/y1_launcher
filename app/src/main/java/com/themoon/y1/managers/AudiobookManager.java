@@ -1,5 +1,7 @@
 package com.themoon.y1.managers;
 
+import com.themoon.y1.StoragePaths;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import java.io.File;
@@ -9,7 +11,7 @@ import java.util.List;
 public class AudiobookManager {
     private static AudiobookManager instance;
     private SharedPreferences bookPrefs;
-    private File audiobookRoot = new File("/storage/sdcard0/Audiobooks");
+    private File audiobookRoot = StoragePaths.getAudiobooksDir();
 
     private List<File> currentBookChapters = new ArrayList<>();
     private int currentChapterIndex = -1;

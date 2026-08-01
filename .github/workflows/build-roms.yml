@@ -1,0 +1,192 @@
+name: Build JJ Launcher ROMs
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+    inputs:
+      rebuild_all:
+        description: Rebuild all launcher versions (not just new upstream releases)
+        type: boolean
+        default: false
+  schedule:
+    - cron: "*/30 * * * *"
+  repository_dispatch:
+    types: [y1_launcher_release]
+
+permissions:
+  contents: write
+
+env:
+  ROM_REPO: ${{ vars.ROM_REPO || github.repository }}
+  Y1_LAUNCHER_REPO: ${{ vars.Y1_LAUNCHER_REPO || 'ismileblue/y1_launcher' }}
+  Y2_LAUNCHER_REPO: ${{ vars.Y2_LAUNCHER_REPO || github.repository }}
+  Y2_MIN_VERSION: ${{ vars.Y2_MIN_VERSION || '0.11.2' }}
+  Y2_BASE_URL: ${{ vars.Y2_BASE_URL || 'https://github.com/ryan-specter/jj_auto/releases/download/y2-test/rom_y2.zip' }}
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    outputs:
+      has_new: ${{ steps.prepare.outputs.has_new }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      release_matrix: ${{ steps.prepare.outputs.release_matrix }}
+      latest_tag: ${{ steps.prepare.outputs.latest_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine build targets
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ROM_REPO: ${{ env.ROM_REPO }}
+          Y1_LAUNCHER_REPO: ${{ env.Y1_LAUNCHER_REPO }}
+          Y2_LAUNCHER_REPO: ${{ env.Y2_LAUNCHER_REPO }}
+          Y2_MIN_VERSION: ${{ env.Y2_MIN_VERSION }}
+        run: |
+          MODE="new_only"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            MODE="all"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.rebuild_all }}" = "true" ]; then
+            MODE="all"
+          fi
+          echo "repo=${{ github.repository }} ROM_REPO=$ROM_REPO"
+          echo "Y1=$Y1_LAUNCHER_REPO Y2=$Y2_LAUNCHER_REPO MIN=$Y2_MIN_VERSION"
+          ./scripts/prepare-build-matrix.sh "$MODE"
+
+      - name: Upload release metadata
+        if: steps.prepare.outputs.has_new == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-release-metadata
+          path: releases.json
+          retention-days: 7
+
+  build:
+    needs: check-upstream
+    if: needs.check-upstream.outputs.has_new == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.check-upstream.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip e2fsprogs curl
+
+      - name: Build ROM
+        env:
+          Y2_BASE_URL: ${{ env.Y2_BASE_URL }}
+        run: |
+          TAG="${{ matrix.tag }}"
+          TYPE="${{ matrix.type }}"
+          APK_URL="${{ matrix.apk_url }}"
+          OUT_DIR="$GITHUB_WORKSPACE/dist/${TAG}"
+          mkdir -p "$OUT_DIR"
+          case "$TYPE" in
+            a)   OUT_FILE="$OUT_DIR/rom.zip" ;;
+            b)   OUT_FILE="$OUT_DIR/rom_type_b.zip" ;;
+            y2)  OUT_FILE="$OUT_DIR/rom_y2.zip" ;;
+            *)   echo "unknown type: $TYPE" >&2; exit 1 ;;
+          esac
+          echo "Building $TAG type=$TYPE → ${{ matrix.release_tag }} (apk from ${{ matrix.launcher_repo }})"
+          ./scripts/build-rom.sh "$TYPE" --launcher-tag "$TAG" --launcher-apk-url "$APK_URL" "$OUT_FILE"
+
+      - name: Upload ROM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rom-${{ matrix.release_tag }}-type-${{ matrix.type }}
+          path: dist/${{ matrix.tag }}/
+          retention-days: 14
+
+  release:
+    needs: [check-upstream, build]
+    if: ${{ !cancelled() && needs.check-upstream.outputs.has_new == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.check-upstream.outputs.release_matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-release-metadata
+
+      - name: Download Type A ROM
+        if: ${{ matrix.include_a }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: rom-${{ matrix.release_tag }}-type-a
+          path: dist/type-a
+
+      - name: Download Type B ROM
+        if: ${{ matrix.include_b }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: rom-${{ matrix.release_tag }}-type-b
+          path: dist/type-b
+
+      - name: Download Y2 ROM
+        if: ${{ matrix.include_y2 }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: rom-${{ matrix.release_tag }}-type-y2
+          path: dist/type-y2
+
+      - name: Verify ROM artifacts exist
+        run: |
+          if [ "${{ matrix.include_a }}" = "true" ]; then
+            test -f dist/type-a/rom.zip || { echo "missing Type A"; exit 1; }
+          fi
+          if [ "${{ matrix.include_b }}" = "true" ]; then
+            test -f dist/type-b/rom_type_b.zip || { echo "missing Type B"; exit 1; }
+          fi
+          if [ "${{ matrix.include_y2 }}" = "true" ]; then
+            test -f dist/type-y2/rom_y2.zip || { echo "missing Type Y2"; exit 1; }
+          fi
+
+      - name: Prepare release notes
+        run: |
+          ./scripts/format-release-notes.sh releases.json "${{ matrix.tag }}" > RELEASE_NOTES.md
+
+      - name: Create Y1 release (a+b only)
+        if: ${{ matrix.include_a && matrix.include_b && !matrix.include_y2 }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ matrix.release_tag }}
+          name: JJ Launcher ROM ${{ matrix.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/type-a/rom.zip
+            dist/type-b/rom_type_b.zip
+          fail_on_unmatched_files: true
+          make_latest: false
+          overwrite_files: true
+
+      - name: Create upstream combined release (a+b+y2)
+        if: ${{ matrix.include_a && matrix.include_b && matrix.include_y2 }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ matrix.release_tag }}
+          name: JJ Launcher ROM ${{ matrix.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/type-a/rom.zip
+            dist/type-b/rom_type_b.zip
+            dist/type-y2/rom_y2.zip
+          fail_on_unmatched_files: true
+          make_latest: ${{ matrix.tag == needs.check-upstream.outputs.latest_tag }}
+          overwrite_files: true
