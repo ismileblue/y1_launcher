@@ -2,6 +2,7 @@ package com.themoon.y1;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
@@ -30,6 +31,7 @@ import java.util.TreeMap;
 
 public class VideoPlayerActivity extends Activity {
     private VideoView videoView;
+    private String videoPath;
     private LinearLayout layoutControls, layoutVolumeOverlay;
     private TextView tvCurrent, tvTotal, tvSubtitle;
     private ProgressBar progressVideo, volumeProgress;
@@ -49,11 +51,25 @@ public class VideoPlayerActivity extends Activity {
     private AudioManager audioManager;
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        com.themoon.y1.managers.BatteryStatsManager.getInstance(this).setMode(com.themoon.y1.managers.BatteryStatsManager.MODE_VIDEO);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_video_player);
+
+        // 비디오 재생 시 배경 음악 중지
+        try {
+            if (com.themoon.y1.managers.AudioPlayerManager.getInstance().isPlaying()) {
+                com.themoon.y1.managers.AudioPlayerManager.getInstance().playOrPauseMusic();
+            }
+        } catch (Exception e) {}
 
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
 
@@ -73,13 +89,15 @@ public class VideoPlayerActivity extends Activity {
         // 🚀 볼륨바 색상을 테마의 포커스 색상으로 맞춰줌!
         try {
             int themeFocusColor = ThemeManager.getListButtonFocusedBg() | 0xFF000000;
-            volumeProgress.getProgressDrawable().setColorFilter(themeFocusColor, android.graphics.PorterDuff.Mode.SRC_IN);
-        } catch (Exception e) {}
+            volumeProgress.getProgressDrawable().setColorFilter(themeFocusColor,
+                    android.graphics.PorterDuff.Mode.SRC_IN);
+        } catch (Exception e) {
+        }
 
-        String videoPath = getIntent().getStringExtra("VIDEO_PATH");
+        videoPath = getIntent().getStringExtra("VIDEO_PATH");
 
         if (videoPath == null || !new File(videoPath).exists()) {
-            Toast.makeText(this, "🚨 Invalid Video File", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "⚠️ Invalid Video File", Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
@@ -95,8 +113,17 @@ public class VideoPlayerActivity extends Activity {
                     if (speed != 1.0f) {
                         mp.setPlaybackParams(mp.getPlaybackParams().setSpeed(speed));
                     }
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                }
             }
+
+            SharedPreferences prefs = getSharedPreferences("y1_prefs", MODE_PRIVATE);
+            int savedPos = prefs.getInt("video_pos_" + videoPath, 0);
+            if (savedPos > 0) {
+                mp.seekTo(savedPos);
+                lastKnownPosition = savedPos;
+            }
+
             videoView.start();
             showControls(false); // 재생 시작 시 3초 후 UI 자동 숨김
             uiHandler.post(updateUITask); // 실시간 재생 바 루프 가동
@@ -144,12 +171,14 @@ public class VideoPlayerActivity extends Activity {
                 int streamFm = 10;
                 try {
                     streamFm = (Integer) AudioManager.class.getDeclaredField("STREAM_FM").get(null);
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                }
                 int fmMax = audioManager.getStreamMaxVolume(streamFm);
                 int fmVol = (int) (((float) currentVol / maxVol) * fmMax);
                 audioManager.setStreamVolume(streamFm, fmVol, 0);
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+        }
 
         showDynamicVolumeOverlay();
     }
@@ -168,11 +197,13 @@ public class VideoPlayerActivity extends Activity {
         public void run() {
             if (videoView != null && videoView.isPlaying()) {
                 int current = videoView.getCurrentPosition();
+                lastKnownPosition = current;
                 int total = videoView.getDuration();
 
                 tvCurrent.setText(formatTime(current));
                 tvTotal.setText(formatTime(total));
-                if (total > 0) progressVideo.setProgress((int) (((float) current / total) * 100));
+                if (total > 0)
+                    progressVideo.setProgress((int) (((float) current / total) * 100));
 
                 // 자막 업데이트
                 if (!subtitlesMap.isEmpty()) {
@@ -200,18 +231,21 @@ public class VideoPlayerActivity extends Activity {
         }
 
         // 🚀 2. 휠 조작 (방향을 메인 음악 플레이어랑 100% 똑같이 맞춤!)
-        if (keyCode == 21 || keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == 19) {
+        if (keyCode == 21 || keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                || keyCode == 19) {
             adjustVolume(false); // 💡 왼쪽(21)이나 위로 돌리면 소리 줄이기
             return true;
         }
-        if (keyCode == 22 || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == 20) {
-            adjustVolume(true);  // 💡 오른쪽(22)이나 아래로 돌리면 소리 키우기
+        if (keyCode == 22 || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                || keyCode == 20) {
+            adjustVolume(true); // 💡 오른쪽(22)이나 아래로 돌리면 소리 키우기
             return true;
         }
 
         // 🚀 3. 재생/정지 통합 (가운데 확인 버튼 & 하단 미디어 버튼)
         if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == 23 ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY || keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY
+                || keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE) {
 
             if (videoView.isPlaying()) {
                 videoView.pause();
@@ -224,6 +258,24 @@ public class VideoPlayerActivity extends Activity {
             }
             return true;
         }
+        if (keyCode == 88 || keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+            if (videoView != null) {
+                int pos = videoView.getCurrentPosition() - 10000;
+                videoView.seekTo(pos < 0 ? 0 : pos);
+                showControls(false);
+            }
+            return true;
+        }
+
+        if (keyCode == 87 || keyCode == KeyEvent.KEYCODE_MEDIA_NEXT) {
+            if (videoView != null) {
+                int pos = videoView.getCurrentPosition() + 10000;
+                int dur = videoView.getDuration();
+                videoView.seekTo(dur > 0 && pos > dur ? dur : pos);
+                showControls(false);
+            }
+            return true;
+        }
 
         return super.onKeyDown(keyCode, event);
     }
@@ -233,7 +285,8 @@ public class VideoPlayerActivity extends Activity {
         try {
             String basePath = videoPath.substring(0, videoPath.lastIndexOf('.'));
             File srtFile = new File(basePath + ".srt");
-            if (!srtFile.exists()) return;
+            if (!srtFile.exists())
+                return;
 
             BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(srtFile), "UTF-8"));
             String line;
@@ -260,7 +313,8 @@ public class VideoPlayerActivity extends Activity {
                 subtitlesMap.put(startTime, text.toString().trim());
             }
             br.close();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+        }
     }
 
     private int parseSrtTime(String timeStr) {
@@ -272,7 +326,9 @@ public class VideoPlayerActivity extends Activity {
             int s = Integer.parseInt(sParts[0]);
             int ms = sParts.length > 1 ? Integer.parseInt(sParts[1]) : 0;
             return (h * 3600 + m * 60 + s) * 1000 + ms;
-        } catch (Exception e) { return 0; }
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private String formatTime(int ms) {
@@ -296,7 +352,21 @@ public class VideoPlayerActivity extends Activity {
                     MainActivity.instance.equalizer.setEnabled(true);
                 }
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+        }
+    }
+
+    private int lastKnownPosition = 0;
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        com.themoon.y1.managers.BatteryStatsManager.getInstance(this).setMode(com.themoon.y1.managers.BatteryStatsManager.MODE_MUSIC);
+        if (videoPath != null && lastKnownPosition > 0) {
+            getSharedPreferences("y1_prefs", MODE_PRIVATE).edit()
+                    .putInt("video_pos_" + videoPath, lastKnownPosition)
+                    .apply();
+        }
     }
 
     @Override
@@ -305,6 +375,13 @@ public class VideoPlayerActivity extends Activity {
         uiHandler.removeCallbacks(updateUITask);
         uiHandler.removeCallbacks(hideUITask);
         volumeHandler.removeCallbacks(hideVolumeTask);
-        if (videoView != null) videoView.stopPlayback();
+        if (videoView != null) {
+            if (videoPath != null && lastKnownPosition > 0) {
+                getSharedPreferences("y1_prefs", MODE_PRIVATE).edit()
+                        .putInt("video_pos_" + videoPath, lastKnownPosition)
+                        .apply();
+            }
+            videoView.stopPlayback();
+        }
     }
 }

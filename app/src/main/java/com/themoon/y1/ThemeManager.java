@@ -18,11 +18,12 @@ public class ThemeManager {
         public String iconNormal, iconFocused, previewImage;
         public String action, gravity;
         public int radius, focusIndex, textSize, textSecondarySize;
-        public String textPosition, textAlign, bgColor;
+        public String textPosition, textAlign;
+        public String bgColor;
         public int padding;
         public int focusOffsetX, focusOffsetY;
         public float focusScale;
-
+        public String progressBgColor = "";
         // 🚀 생성자 파라미터 맨 끝 쪽에 String liveWidget 을 추가합니다!
         public MenuElement(String id, String type, String parentId, String visibleOnFocus, int x, int y, int width, int height,
                            String textNormal, String textFocused, String textRight,
@@ -30,6 +31,17 @@ public class ThemeManager {
                            String iconNormal, String iconFocused, String previewImage, String action,
                            String gravity, int radius, int focusIndex, int textSize, int textSecondarySize,
                            String textPosition, String textAlign, String bgColor, int padding, int focusOffsetX, int focusOffsetY, float focusScale) {
+            this(id, type, parentId, visibleOnFocus, x, y, width, height, textNormal, textFocused, textRight,
+                 textRightColor, textRightFocusedColor, iconNormal, iconFocused, previewImage, action,
+                 gravity, radius, focusIndex, textSize, textSecondarySize, textPosition, textAlign, bgColor, "", padding, focusOffsetX, focusOffsetY, focusScale);
+        }
+
+        public MenuElement(String id, String type, String parentId, String visibleOnFocus, int x, int y, int width, int height,
+                           String textNormal, String textFocused, String textRight,
+                           String textRightColor, String textRightFocusedColor,
+                           String iconNormal, String iconFocused, String previewImage, String action,
+                           String gravity, int radius, int focusIndex, int textSize, int textSecondarySize,
+                           String textPosition, String textAlign, String bgColor, String progressBgColor, int padding, int focusOffsetX, int focusOffsetY, float focusScale) {
             this.id = id; this.type = type; this.parentId = parentId;
             this.visibleOnFocus = visibleOnFocus; // 🚀 매핑 완료
             this.x = x; this.y = y;
@@ -40,6 +52,7 @@ public class ThemeManager {
             this.action = action; this.gravity = gravity; this.radius = radius;
             this.focusIndex = focusIndex; this.textSize = textSize; this.textSecondarySize = textSecondarySize;
             this.textPosition = textPosition; this.textAlign = textAlign; this.bgColor = bgColor;
+            this.progressBgColor = progressBgColor;
             this.padding = padding;
             this.focusOffsetX = focusOffsetX; this.focusOffsetY = focusOffsetY;
             this.focusScale = focusScale;
@@ -53,7 +66,7 @@ public class ThemeManager {
         public int bgOverlay, statusBarBg;
         public int btnNormal, btnFocused, btnFocusedText, buttonRadius;
         public List<MenuElement> menuElements;
-
+        public List<MenuElement> playerElements;
         public ThemeData(String folderPath, String name, String bgImage, android.graphics.Typeface customFont,
                          int textPrimary, int textSecondary, int bgOverlay, int statusBarBg,
                          int btnNormal, int btnFocused, int btnFocusedText, int buttonRadius) {
@@ -64,6 +77,7 @@ public class ThemeManager {
             this.btnNormal = btnNormal; this.btnFocused = btnFocused;
             this.btnFocusedText = btnFocusedText; this.buttonRadius = buttonRadius;
             this.menuElements = new ArrayList<>();
+            this.playerElements = new ArrayList<>();
         }
     }
 
@@ -287,6 +301,45 @@ public class ThemeManager {
                                     ));
                                 }
                             }
+
+                            // 🚀 [신규 장착] 플레이어 화면용 "player_ui" 해독 엔진!
+                            if (json.has("player_ui")) {
+                                JSONArray playerArray = json.getJSONArray("player_ui");
+                                for (int i = 0; i < playerArray.length(); i++) {
+                                    JSONObject el = playerArray.getJSONObject(i);
+                                    theme.playerElements.add(new MenuElement(
+                                            el.optString("id", ""),
+                                            el.optString("type", ""),
+                                            el.optString("parent_id", ""),
+                                            el.optString("visible_on_focus", ""),
+                                            el.optInt("x", 0), el.optInt("y", 0),
+                                            el.optInt("width", -1), el.optInt("height", -1),
+                                            el.optString("text_normal", ""),
+                                            el.optString("text_focused", ""),
+                                            el.optString("text_right", ""),
+                                            el.optString("text_right_color", ""),
+                                            el.optString("text_right_focused_color", ""),
+                                            el.optString("icon_normal", ""),
+                                            el.optString("icon_focused", ""),
+                                            el.optString("preview_image", ""),
+                                            el.optString("action", "NONE"),
+                                            el.optString("gravity", "top|left"),
+                                            el.optInt("radius", -1),
+                                            el.optInt("focus_index", -1),
+                                            el.optInt("text_size", -1),
+                                            el.optInt("text_secondary_size", -1),
+                                            el.optString("text_position", "bottom"),
+                                            el.optString("text_align", "center"),
+                                            el.optString("bg_color", ""),
+                                            el.optString("progress_bg_color", el.optString("bg_color_secondary", el.optString("track_color", ""))),
+                                            el.optInt("padding", 0),
+                                            el.optInt("focus_offset_x", 0),
+                                            el.optInt("focus_offset_y", 0),
+                                            (float) el.optDouble("focus_scale", 1.0)
+                                    ));
+                                }
+                            }
+
                             availableThemes.add(theme);
                         } catch (Exception e) { e.printStackTrace(); }
                     }

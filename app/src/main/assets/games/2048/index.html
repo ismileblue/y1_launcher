@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=480, height=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Y1 Classic 2048</title>
+    <style>
+        body { margin: 0; padding: 0; background: #faf8ef; font-family: sans-serif; overflow: hidden; touch-action: none; width: 480px; height: 360px; user-select: none; }
+        #left-panel { position: absolute; left: 10px; top: 15px; width: 130px; height: 330px; }
+        .title { font-size: 42px; font-weight: bold; color: #776e65; text-align: center; margin: 0 0 15px 0; }
+        .score-box { background: #bbada0; padding: 8px; border-radius: 6px; text-align: center; margin-bottom: 15px; }
+        .score-lbl { font-size: 14px; font-weight: bold; color: #eee4da; }
+        .score-val { font-size: 26px; font-weight: bold; color: #ffffff; margin-top: 2px; }
+
+        .inst { font-size: 13px; font-weight: bold; color: #776e65; text-align: center; background: #eee4da; padding: 10px 4px; border-radius: 6px; line-height: 1.5; }
+        .inst span { color: #d32f2f; font-size: 11px; }
+
+        #board-container { position: absolute; left: 145px; top: 15px; width: 330px; height: 330px; background: #bbada0; border-radius: 10px; padding: 2%; box-sizing: border-box; }
+        .cell-bg { position: absolute; width: 22%; height: 22%; background: #cdc1b4; border-radius: 6px; }
+        .cell { position: absolute; width: 22%; height: 22%; border-radius: 6px; display: table; text-align: center; -webkit-transition: top 0.15s ease-in-out, left 0.15s ease-in-out; transition: top 0.15s ease-in-out, left 0.15s ease-in-out; }
+        .cell span { display: table-cell; vertical-align: middle; font-weight: bold; font-size: 38px; color: #776e65; }
+
+        .cell-new { -webkit-animation: pop 0.25s ease forwards; animation: pop 0.25s ease forwards; }
+        .cell-merged { -webkit-animation: pop 0.15s ease forwards; animation: pop 0.15s ease forwards; }
+        @-webkit-keyframes pop { 0% { -webkit-transform: scale(0.2); opacity: 0; } 70% { -webkit-transform: scale(1.15); opacity: 1; } 100% { -webkit-transform: scale(1); opacity: 1; } }
+
+        .c2 { background: #eee4da; } .c4 { background: #ede0c8; } .c8 { background: #f2b179; } .c8 span { color: #f9f6f2; } .c16 { background: #f59563; } .c16 span { color: #f9f6f2; } .c32 { background: #f67c5f; } .c32 span { color: #f9f6f2; } .c64 { background: #f65e3b; } .c64 span { color: #f9f6f2; } .c128 { background: #edcf72; } .c128 span { color: #f9f6f2; font-size: 32px; } .c256 { background: #edcc61; } .c256 span { color: #f9f6f2; font-size: 32px; } .c512 { background: #edc850; } .c512 span { color: #f9f6f2; font-size: 32px; } .c1024 { background: #edc53f; } .c1024 span { color: #f9f6f2; font-size: 26px; } .c2048 { background: #edc22e; } .c2048 span { color: #f9f6f2; font-size: 26px; }
+
+        #gameover { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(238,228,218,0.85); display: none; z-index: 100; border-radius: 10px; text-align: center; }
+        #gameover-inner { display: table-cell; vertical-align: middle; font-weight: bold; }
+        #gameover span { font-size: 44px; color: #776e65; display: block; margin-top: 120px; }
+        #gameover small { font-size: 20px; color: #776e65; display: block; margin-top: 10px; }
+
+        /* 🚀 신규 추가: 종료 확인 팝업 UI 스타일 */
+        #exit-popup { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(238,228,218,0.92); display: none; z-index: 200; text-align: center; border-radius: 10px; }
+        #exit-popup-inner { display: table-cell; vertical-align: middle; font-weight: bold; }
+        #exit-popup span { font-size: 32px; color: #776e65; display: block; margin-top: 100px; margin-bottom: 30px; }
+        .popup-btn { display: inline-block; padding: 12px 20px; margin: 0 10px; border-radius: 6px; font-size: 16px; font-weight: bold; background: #cdc1b4; color: #776e65; border: 3px solid transparent; transition: all 0.2s; }
+        .selected-cancel { background: #f2b179; color: #ffffff; border: 3px solid #f67c5f; box-shadow: 0 0 15px #f2b179; transform: scale(1.1); }
+        .selected-exit { background: #f65e3b; color: #ffffff; border: 3px solid #ff0000; box-shadow: 0 0 15px #f65e3b; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+<div id="left-panel">
+    <div class="title">2048</div>
+    <div class="score-box">
+        <div class="score-lbl">SCORE</div>
+        <div class="score-val" id="score">0</div>
+    </div>
+    <div class="score-box">
+        <div class="score-lbl">BEST</div>
+        <div class="score-val" id="best">0</div>
+    </div>
+    <div class="inst">
+        [BACK] : <b>UP</b><br>
+        [PLAY] : <b>DOWN</b><br>
+        [PREV] : <b>LEFT</b><br>
+        [NEXT] : <b>RIGHT</b><br>
+        <span>(Exit = Click CENTER)</span>
+    </div>
+</div>
+
+<div id="board-container">
+    <div id="grid-bg"></div>
+    <div id="tile-container"></div>
+
+    <!-- 게임 오버 팝업 -->
+    <div id="gameover">
+        <div id="gameover-inner">
+            <span>GAME OVER</span><small>Click CENTER to Restart</small>
+        </div>
+    </div>
+
+    <!-- 🚀 신규 추가: 종료 확인 팝업 -->
+    <div id="exit-popup">
+        <div id="exit-popup-inner">
+            <span>Exit Game?</span>
+            <div id="btn-cancel" class="popup-btn selected-cancel">CANCEL</div>
+            <div id="btn-exit" class="popup-btn">EXIT</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    var tiles = [];
+    var tileId = 0;
+    var score = 0;
+    var savedBest = localStorage.getItem('y1_2048_bestScore');
+    var bestScore = savedBest ? parseInt(savedBest) : 0;
+    var isGameOver = false;
+    var isAnimating = false;
+
+    function initGrid() {
+        var bg = document.getElementById('grid-bg');
+        var html = '';
+        for(var r = 0; r < 4; r++) {
+            for(var c = 0; c < 4; c++) {
+                var top = (r * 24.5 + 2) + '%';
+                var left = (c * 24.5 + 2) + '%';
+                html += '<div class="cell-bg" style="top:' + top + '; left:' + left + ';"></div>';
+            }
+        }
+        bg.innerHTML = html;
+    }
+
+    function getTile(r, c) {
+        for(var i = 0; i < tiles.length; i++) {
+            if(tiles[i].r === r && tiles[i].c === c && !tiles[i].toDelete) return tiles[i];
+        }
+        return null;
+    }
+
+    function addRandomTile() {
+        var empty = [];
+        for(var r = 0; r < 4; r++) {
+            for(var c = 0; c < 4; c++) {
+                if(!getTile(r, c)) empty.push({r: r, c: c});
+            }
+        }
+        if(empty.length > 0) {
+            var cell = empty[Math.floor(Math.random() * empty.length)];
+            tiles.push({
+                id: tileId++, r: cell.r, c: cell.c,
+                val: Math.random() < 0.9 ? 2 : 4,
+                isNew: true, toDelete: false, el: null
+            });
+        }
+    }
+
+    function drawBoard() {
+        var container = document.getElementById('tile-container');
+        for(var i = 0; i < tiles.length; i++) {
+            var t = tiles[i];
+            if(!t.el) {
+                t.el = document.createElement('div');
+                container.appendChild(t.el);
+            }
+            var top = (t.r * 24.5 + 2) + '%';
+            var left = (t.c * 24.5 + 2) + '%';
+
+            var classes = 'cell c' + t.val;
+            if(t.isNew) { classes += ' cell-new'; t.isNew = false; }
+            if(t.isMerged) { classes += ' cell-merged'; }
+
+            t.el.style.zIndex = t.toDelete ? 10 : 20;
+            t.el.className = classes;
+            t.el.style.top = top;
+            t.el.style.left = left;
+            t.el.innerHTML = '<span>' + t.val + '</span>';
+        }
+        document.getElementById('score').innerText = score;
+        document.getElementById('best').innerText = bestScore;
+    }
+
+    function move(dir) {
+        if(isGameOver || isAnimating) return;
+        var moved = false;
+
+        if (dir === 0) tiles.sort(function(a,b) { return a.r - b.r; });
+        if (dir === 1) tiles.sort(function(a,b) { return b.r - a.r; });
+        if (dir === 2) tiles.sort(function(a,b) { return a.c - b.c; });
+        if (dir === 3) tiles.sort(function(a,b) { return b.c - a.c; });
+
+        for (var i = 0; i < 4; i++) {
+            var lineTiles = [];
+            for(var j=0; j<tiles.length; j++) {
+                if (tiles[j].toDelete) continue;
+                if (dir <= 1 && tiles[j].c === i) lineTiles.push(tiles[j]);
+                if (dir >= 2 && tiles[j].r === i) lineTiles.push(tiles[j]);
+            }
+
+            var targetPos = (dir === 0 || dir === 2) ? 0 : 3;
+            var step = (dir === 0 || dir === 2) ? 1 : -1;
+
+            for (var k = 0; k < lineTiles.length; k++) {
+                var t = lineTiles[k];
+
+                if (k < lineTiles.length - 1 && lineTiles[k].val === lineTiles[k+1].val) {
+                    var tNext = lineTiles[k+1];
+                    if (dir <= 1) { t.r = targetPos; tNext.r = targetPos; }
+                    else { t.c = targetPos; tNext.c = targetPos; }
+
+                    tNext.toDelete = true;
+                    t.val *= 2;
+                    score += t.val;
+                    t.isMerged = true;
+                    moved = true;
+
+                    targetPos += step;
+                    k++;
+                } else {
+                    var changed = false;
+                    if (dir <= 1) { if(t.r !== targetPos) { t.r = targetPos; changed = true; } }
+                    else { if(t.c !== targetPos) { t.c = targetPos; changed = true; } }
+
+                    if (changed) moved = true;
+                    targetPos += step;
+                }
+            }
+        }
+
+        if(moved) {
+            isAnimating = true;
+            if(score > bestScore) {
+                bestScore = score;
+                localStorage.setItem('y1_2048_bestScore', bestScore);
+            }
+            drawBoard();
+
+            setTimeout(function() {
+                for(var i = tiles.length - 1; i >= 0; i--) {
+                    if(tiles[i].toDelete) {
+                        if(tiles[i].el && tiles[i].el.parentNode) {
+                            tiles[i].el.parentNode.removeChild(tiles[i].el);
+                        }
+                        tiles.splice(i, 1);
+                    }
+                }
+                for(var i = 0; i < tiles.length; i++) tiles[i].isMerged = false;
+                addRandomTile();
+                drawBoard();
+                isAnimating = false;
+                checkGameOver();
+            }, 180);
+        }
+    }
+
+    function checkGameOver() {
+        if(tiles.length < 16) return;
+        var b = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+        for(var i = 0; i < tiles.length; i++) {
+            if(!tiles[i].toDelete) b[tiles[i].r][tiles[i].c] = tiles[i].val;
+        }
+        for(var r = 0; r < 4; r++) {
+            for(var c = 0; c < 4; c++) {
+                if(b[r][c] === 0) return;
+                if(c < 3 && b[r][c] === b[r][c+1]) return;
+                if(r < 3 && b[r][c] === b[r+1][c]) return;
+            }
+        }
+        document.getElementById('gameover').style.display = 'table';
+        isGameOver = true;
+    }
+
+    function restart() {
+        document.getElementById('tile-container').innerHTML = '';
+        tiles = []; tileId = 0; score = 0; isGameOver = false;
+        document.getElementById('gameover').style.display = 'none';
+        addRandomTile(); addRandomTile(); drawBoard();
+    }
+
+    initGrid();
+
+    // =========================================================
+    // 🚀 [팝업 통제 엔진] 롱프레스 탈출을 팝업 방식으로 대개조!
+    // =========================================================
+    var exitTimer = null;
+    var lastMoveTime = 0;
+    var isCenterLongPressed = false;
+    var isExitPopupShowing = false;
+    var exitSelection = 0; // 0: CANCEL, 1: EXIT
+
+    // 팝업 소환 함수
+    function showExitPopup() {
+        isExitPopupShowing = true;
+        exitSelection = 0; // 실수 방지를 위해 팝업이 뜨면 항상 CANCEL 쪽에 먼저 커서를 둡니다!
+        document.getElementById('exit-popup').style.display = 'table';
+        updateExitUI();
+    }
+
+    // 팝업 닫기 함수
+    function hideExitPopup() {
+        isExitPopupShowing = false;
+        document.getElementById('exit-popup').style.display = 'none';
+    }
+
+    // 팝업 내부 커서 이동(선택) 함수
+    function updateExitUI() {
+        var btnCancel = document.getElementById('btn-cancel');
+        var btnExit = document.getElementById('btn-exit');
+        if (exitSelection === 0) {
+            btnCancel.className = 'popup-btn selected-cancel';
+            btnExit.className = 'popup-btn';
+        } else {
+            btnCancel.className = 'popup-btn';
+            btnExit.className = 'popup-btn selected-exit';
+        }
+    }
+
+    window.onDeviceKey = function(keyCode, action) {
+        var isDown = (action === 0);
+        var now = new Date().getTime();
+
+        // 🚨 1. 종료 팝업이 떠 있을 때의 조작망 (게임판 조작 완전 차단)
+        if (isExitPopupShowing) {
+            if (isDown) {
+                // 좌/우 (PREV/NEXT) 버튼으로 취소/종료 선택 이동
+                if (keyCode === 88 || keyCode === 21) {
+                    exitSelection = 0; updateExitUI();
+                }
+                else if (keyCode === 87 || keyCode === 22) {
+                    exitSelection = 1; updateExitUI();
+                }
+                // 가운데 버튼(ENTER)으로 결정!
+                else if (keyCode === 23 || keyCode === 66) {
+                    if (exitSelection === 1) {
+                        if (window.Y1App) Y1App.exitGame(); // 💥 EXIT 선택 시 완전 종료
+                    } else {
+                        hideExitPopup(); // CANCEL 선택 시 팝업만 조용히 닫기
+                    }
+                }
+            }
+            return; // 팝업 중에는 다른 조작은 절대 무시!
+        }
+
+        // 🚨 2. 평상시 가운데 버튼 짧게 누르기 (1회 클릭) 감지망
+            if (keyCode === 23 || keyCode === 66) {
+                if (isDown) { // 버튼을 누르는 순간 즉시 발동!
+                    if (isGameOver) {
+                        restart(); // 게임 오버 상태일 때는 재시작
+                    } else {
+                        showExitPopup(); // 평상시엔 바로 종료 팝업 소환!
+                    }
+                }
+                return;
+            }
+
+        // 🚨 3. 평상시 게임 방향키 조작망
+        if (isDown) {
+            if (now - lastMoveTime < 150) return; // 중복 따닥! 방지 쿨타임
+
+            var moved = false;
+
+            // [위 버튼] BACK (4) -> 위로 이동
+            if (keyCode === 4) { move(0); moved = true; }
+
+            // [아래 버튼] PLAY/PAUSE (85, 126, 127) -> 아래로 이동
+            else if (keyCode === 85 || keyCode === 126 || keyCode === 127) { move(1); moved = true; }
+
+            // [왼쪽 버튼] PREVIOUS (88) -> 왼쪽으로 이동
+            else if (keyCode === 88) { move(2); moved = true; }
+
+            // [오른쪽 버튼] NEXT (87) -> 오른쪽으로 이동
+            else if (keyCode === 87) { move(3); moved = true; }
+
+            if (moved) lastMoveTime = now;
+        }
+    };
+
+    // PC 브라우저용 예비 매핑
+    window.addEventListener('keydown', function(e) {
+        if (e.keyCode === 38) { move(0); e.preventDefault(); }
+        else if (e.keyCode === 40) { move(1); e.preventDefault(); }
+        else if (e.keyCode === 37) { move(2); e.preventDefault(); }
+        else if (e.keyCode === 39) { move(3); e.preventDefault(); }
+    });
+
+    restart();
+</script>
+</body>
+</html>

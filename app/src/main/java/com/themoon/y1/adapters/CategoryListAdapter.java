@@ -61,10 +61,10 @@ public class CategoryListAdapter extends BaseAdapter {
 
         final String name = items.get(position);
 
+        // 🚀 [핵심 개조] 앨범 모드거나, 가수의 앨범(ARTIST_ALBUM) 모드일 때 모두 왼쪽 앨범 아트 썸네일을 세팅합니다!
         // 🚀 [핵심 개조] 앨범 모드일 때만 왼쪽 아이콘(앨범 아트 썸네일)을 세팅합니다!
-        if (type.equals("ALBUM")) {
+        if (type.equals("ALBUM") || type.equals("ARTIST_ALBUM") || type.equals("YEAR_ARTIST_ALBUM") || type.equals("GENRE_ARTIST_ALBUM")) {
             btn.setText(name); // 💿 이모티콘을 없애고 순수 앨범 이름만 넣습니다.
-
             // 1. 메모리 금고에 이미 불러온 그림이 있는지 확인!
             Drawable leftDrawable = coverCache.get(name);
 
@@ -97,15 +97,24 @@ public class CategoryListAdapter extends BaseAdapter {
                             break; // 실제 파일이 존재하면 즉시 탈출!
                         }
 
-                        // 🚀 ③ 인터넷 이미지가 없다면 파일 내부 내장 아트(Embedded) 후보로 등록 (FLAC 제외, OPUS는 4.0 스캐너 투입!)
-                        if (embeddedPic == null && !trackPath.toLowerCase().endsWith(".flac")) {
+                        // 🚀 ③ 인터넷 이미지가 없다면 파일 내부 내장 아트(Embedded) 후보로 등록
+                        if (embeddedPic == null) {
 
                             // 🌟 [추가된 4.0 스캐너] Opus 파일일 경우 바주카포 출동!
                             if (trackPath.toLowerCase().endsWith(".opus")) {
                                 try {
                                     Object[] opusTags = com.themoon.y1.managers.AudioPlayerManager.getInstance().extractOpusMetadata(new File(trackPath));
-                                    if (opusTags[5] != null) {
+                                    if (opusTags != null && opusTags.length > 5 && opusTags[5] != null) {
                                         embeddedPic = (byte[]) opusTags[5]; // 5번 서랍에 든 앨범 아트 빼오기
+                                    }
+                                } catch (Exception e) {}
+                            }
+                            // 🌟 [초강력 FLAC 해독기 장착!] FLAC 앨범아트 누락 완벽 해결
+                            else if (trackPath.toLowerCase().endsWith(".flac")) {
+                                try {
+                                    Object[] flacTags = com.themoon.y1.managers.AudioPlayerManager.getInstance().extractFlacMetadata(new File(trackPath));
+                                    if (flacTags != null && flacTags.length > 5 && flacTags[5] != null) {
+                                        embeddedPic = (byte[]) flacTags[5]; // FLAC은 무조건 5번 방에서 꺼내옵니다!
                                     }
                                 } catch (Exception e) {}
                             }

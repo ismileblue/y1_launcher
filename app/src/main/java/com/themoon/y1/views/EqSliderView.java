@@ -14,7 +14,6 @@ public class EqSliderView extends android.view.View {
 
         trackPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         trackPaint.setStyle(android.graphics.Paint.Style.FILL);
-        trackPaint.setColor(0xFF555555);
 
         activeTrackPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         activeTrackPaint.setStyle(android.graphics.Paint.Style.FILL);
@@ -34,36 +33,44 @@ public class EqSliderView extends android.view.View {
 
     @Override
     protected void onDraw(android.graphics.Canvas canvas) {
+        int textColor = 0xFFFFFFFF;
+        int secondaryColor = 0xFFAAAAAA;
+        try {
+            textColor = ThemeManager.getTextColorPrimary();
+            secondaryColor = ThemeManager.getTextColorSecondary();
+        } catch(Exception e) {}
+
+        trackPaint.setColor(secondaryColor);
+
         int w = getWidth(), h = getHeight();
         float padY = 40f;
         float trackX = w / 2f;
         float trackHeight = h - (padY * 2);
         float trackTop = padY, trackBottom = h - padY;
 
-        // 뒷 배경 트랙 (회색 선)
+        // 배경 트랙 (보조 텍스트 색상 사용)
         trackPaint.setStrokeWidth(6f);
         canvas.drawLine(trackX, trackTop, trackX, trackBottom, trackPaint);
-        // 정중앙 0dB 눈금 선
+        // 중앙 0dB 눈금
         canvas.drawLine(trackX - 10f, trackTop + trackHeight/2f, trackX + 10f, trackTop + trackHeight/2f, trackPaint);
 
         // 현재 데시벨의 위치 비율 계산
         float ratio = (float) (level - min) / (max - min);
         float thumbY = trackBottom - (ratio * trackHeight);
 
-        // 조작 중일 땐 주황색, 포커스 상태일 땐 테마색, 평소엔 밝은 회색
-        activeTrackPaint.setColor(isAdjusting ? 0xFFFF8800 : (isFocused ? themeColor : 0xFFAAAAAA));
+        // 조작 중일 땐 주황색, 포커스 상태일 땐 테마색, 평소엔 보조색
+        activeTrackPaint.setColor(isAdjusting ? 0xFFFF8800 : (isFocused ? themeColor : secondaryColor));
         activeTrackPaint.setStrokeWidth(8f);
         canvas.drawLine(trackX, trackTop + trackHeight/2f, trackX, thumbY, activeTrackPaint);
 
-        // 동그란 손잡이(Thumb)
-        thumbPaint.setColor(isAdjusting ? 0xFFFF8800 : (isFocused ? themeColor : 0xFFDDDDDD));
+        // 동그란 손잡이(Thumb) (평소엔 주 텍스트 색상 사용)
+        thumbPaint.setColor(isAdjusting ? 0xFFFF8800 : (isFocused ? themeColor : textColor));
         canvas.drawCircle(trackX, thumbY, 10f, thumbPaint);
 
         // 손잡이 바로 위에 떠다니는 +dB 텍스트
-        textPaint.setColor(0xFFFFFFFF);
+        textPaint.setColor(textColor);
         textPaint.setTextSize(22f);
         String dbStr = (level > 0 ? "+" : "") + (level / 100);
         canvas.drawText(dbStr, trackX, thumbY - 25f, textPaint);
     }
 }
-

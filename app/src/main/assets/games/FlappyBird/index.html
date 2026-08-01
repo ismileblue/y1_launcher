@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Y1 Original Flappy Bird (Landscape)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #4ec0ca;
+            overflow: hidden;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+        }
+
+        /* 🚀 신규 추가: 종료 팝업 스타일 */
+        #exit-popup { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; z-index: 200; text-align: center; }
+        #exit-popup-inner { display: table-cell; vertical-align: middle; font-weight: bold; width: 100%; height: 100%; }
+        #exit-popup span { font-size: 36px; color: #FFFFFF; display: block; margin-bottom: 30px; text-shadow: 2px 2px 5px #000; font-family: sans-serif; }
+        .popup-btn { display: inline-block; padding: 12px 20px; margin: 0 10px; border-radius: 6px; font-size: 18px; font-weight: bold; background: #333; color: #AAA; border: 3px solid transparent; transition: all 0.2s; font-family: sans-serif; }
+        .selected-cancel { background: #555; color: #FFF; border: 3px solid #FFF; transform: scale(1.1); box-shadow: 0 0 15px #FFF; }
+        .selected-exit { background: #FF3333; color: #FFF; border: 3px solid #FF8888; box-shadow: 0 0 15px #FF0000; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<!-- 🚀 신규 추가: 종료 팝업 HTML -->
+<div id="exit-popup">
+    <div id="exit-popup-inner">
+        <span>Exit Game?</span>
+        <div id="btn-cancel" class="popup-btn selected-cancel">CANCEL</div>
+        <div id="btn-exit" class="popup-btn">EXIT</div>
+    </div>
+</div>
+
+<script>
+    var canvas = document.getElementById('gameCanvas');
+    var ctx = canvas.getContext('2d');
+
+    // 🚀 내부 도화지를 480x360으로 강제 고정
+        canvas.width = 480;
+        canvas.height = 360;
+
+    var sprite = new Image();
+    sprite.src = 'atlas.png';
+
+    var frames = 0;
+    var score = 0;
+
+    var savedBest = localStorage.getItem('y1_flappy_bestScore');
+    var bestScore = savedBest ? parseInt(savedBest) : 0;
+    var isNewBest = false;
+
+    var gameState = 0;
+
+    var themes = {
+        bgX: [0, 292],
+        pipeX: [
+            { top: 112, bot: 168 },
+            { top: 56, bot: 0 }
+        ],
+        birdAnim: [
+            [{sx: 0, sy: 970}, {sx: 56, sy: 970}, {sx: 112, sy: 970}, {sx: 56, sy: 970}],
+            [{sx: 168, sy: 970}, {sx: 224, sy: 646}, {sx: 224, sy: 698}, {sx: 224, sy: 646}],
+            [{sx: 224, sy: 750}, {sx: 224, sy: 802}, {sx: 224, sy: 854}, {sx: 224, sy: 802}]
+        ]
+    };
+
+    var currentBg = Math.floor(Math.random() * 2);
+    var currentPipe = 0;
+    var currentBird = Math.floor(Math.random() * 3);
+
+    var bird = {
+        x: 80,
+        y: 150,
+        width: 34,
+        height: 24,
+        gravity: 0.25,
+        jump: -5.5,
+        velocity: 0,
+        draw: function() {
+            var currentFrame = themes.birdAnim[currentBird][Math.floor(frames / 10) % 4];
+            ctx.save();
+            ctx.translate(this.x, this.y);
+
+            var rotation = Math.min(Math.PI / 4, Math.max(-Math.PI / 4, (this.velocity * 0.1)));
+            ctx.rotate(rotation);
+
+            ctx.drawImage(sprite, currentFrame.sx, currentFrame.sy, 48, 48,
+                          -24, -24, 48, 48);
+            ctx.restore();
+        },
+        flap: function() { this.velocity = this.jump; },
+        update: function() {
+            this.velocity += this.gravity;
+            this.y += this.velocity;
+
+            if (this.y + this.height/2 >= canvas.height - ground.height) {
+                this.y = canvas.height - ground.height - this.height/2;
+                gameState = 2;
+            }
+            if (this.y - this.height/2 <= 0) {
+                this.y = this.height/2;
+                gameState = 2;
+            }
+        }
+    };
+
+    var pipes = {
+        items: [],
+        width: 52,
+        gap: 120,
+        dx: 2.5,
+        draw: function() {
+            var pTopX = themes.pipeX[currentPipe].top;
+            var pBotX = themes.pipeX[currentPipe].bot;
+
+            for (var i = 0; i < this.items.length; i++) {
+                var p = this.items[i];
+
+                var topH = Math.min(p.top, 320);
+                ctx.drawImage(sprite, pTopX, 646 + 320 - topH, 52, topH,
+                              p.x, p.top - topH, this.width, topH);
+
+                var bottomY = p.top + this.gap;
+                var bottomH = canvas.height - bottomY - ground.height;
+                var botH_cut = Math.min(bottomH, 320);
+                ctx.drawImage(sprite, pBotX, 646, 52, botH_cut,
+                              p.x, bottomY, this.width, botH_cut);
+            }
+        },
+        update: function() {
+            if (frames % 100 === 0) {
+                var maxPos = canvas.height - ground.height - this.gap - 20;
+                var minPos = 20;
+                var topHeight = Math.floor(Math.random() * (maxPos - minPos + 1) + minPos);
+                this.items.push({ x: canvas.width, top: topHeight, passed: false });
+            }
+
+            for (var i = 0; i < this.items.length; i++) {
+                var p = this.items[i];
+                p.x -= this.dx;
+
+                if (bird.x + bird.width/2 > p.x && bird.x - bird.width/2 < p.x + this.width) {
+                    if (bird.y - bird.height/2 < p.top || bird.y + bird.height/2 > p.top + this.gap) {
+                        gameState = 2;
+                    }
+                }
+
+                if (p.x + this.width < bird.x && !p.passed) {
+                    score++;
+                    p.passed = true;
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        localStorage.setItem('y1_flappy_bestScore', bestScore);
+                        isNewBest = true;
+                    }
+                }
+
+                if (p.x + this.width < -10) {
+                    this.items.shift();
+                    i--;
+                }
+            }
+        },
+        reset: function() { this.items = []; }
+    };
+
+    var ground = {
+        height: 50,
+        x: 0,
+        draw: function() {
+            if (gameState !== 2) {
+                this.x = (this.x - pipes.dx) % 336;
+            }
+            for(var i = 0; i <= canvas.width / 336 + 1; i++) {
+                ctx.drawImage(sprite, 584, 0, 336, 50,
+                              this.x + (i * 336), canvas.height - this.height, 336, 50);
+            }
+        }
+    };
+
+    function onPress() {
+        if (gameState === 0) {
+            gameState = 1;
+        } else if (gameState === 1) {
+            bird.flap();
+        } else if (gameState === 2) {
+            bird.y = 150;
+            bird.velocity = 0;
+            pipes.reset();
+            score = 0;
+            frames = 0;
+            gameState = 0;
+            isNewBest = false;
+
+            currentBg = Math.floor(Math.random() * 2);
+            currentPipe = Math.floor(Math.random() * 2);
+            currentBird = Math.floor(Math.random() * 3);
+        }
+    }
+
+    // =========================================================
+    // 🚀 신규 엔진: 팝업 제어 로직
+    // =========================================================
+    var isExitPopupShowing = false;
+    var exitSelection = 0;
+    function showExitPopup() {
+        isExitPopupShowing = true;
+        exitSelection = 0;
+        document.getElementById('exit-popup').style.display = 'table';
+        updateExitUI();
+    }
+    function hideExitPopup() {
+        isExitPopupShowing = false;
+        document.getElementById('exit-popup').style.display = 'none';
+    }
+    function updateExitUI() {
+        document.getElementById('btn-cancel').className = exitSelection === 0 ? 'popup-btn selected-cancel' : 'popup-btn';
+        document.getElementById('btn-exit').className = exitSelection === 1 ? 'popup-btn selected-exit' : 'popup-btn';
+    }
+
+    // =========================================================
+    // 🚀 신규 엔진: 기기 맞춤형 키보드 엔진 (Y1 전용)
+    // =========================================================
+    window.onDeviceKey = function(keyCode, action) {
+        var isDown = (action === 0);
+
+        // 팝업이 켜져 있을 때 조작 가로채기 (게임 일시정지 상태)
+        if (isExitPopupShowing) {
+            if (isDown) {
+                // 좌측 방향 (PREV, LEFT, UP)
+                if (keyCode === 88 || keyCode === 19 || keyCode === 21) {
+                    exitSelection = 0; updateExitUI();
+                }
+                // 우측 방향 (NEXT, RIGHT, DOWN)
+                else if (keyCode === 87 || keyCode === 20 || keyCode === 22) {
+                    exitSelection = 1; updateExitUI();
+                }
+                // 확인 (CENTER, ENTER, PLAY)
+                else if (keyCode === 23 || keyCode === 66 || keyCode === 85 || keyCode === 126 || keyCode === 127) {
+                    if (exitSelection === 1) {
+                        if(window.Y1App) Y1App.exitGame(); // 안드로이드 앱으로 종료 빔!
+                    } else {
+                        hideExitPopup(); // 취소
+                    }
+                }
+            }
+            return; // 팝업 중엔 게임 조작 무시
+        }
+
+        // 평상시 게임 조작
+        if (isDown) {
+            if (keyCode === 4) {
+                // 🚀 위(BACK) 버튼 -> 일시정지 & 팝업 띄우기!
+                showExitPopup();
+            }
+            else if (keyCode === 23 || keyCode === 66 || keyCode === 85 || keyCode === 126 || keyCode === 127) {
+                // 🚀 아래(PLAY) / 가운데 버튼 -> 점프!
+                onPress();
+            }
+        }
+    };
+
+    // PC 브라우저용 예비 이벤트
+    window.addEventListener('mousedown', onPress);
+    window.addEventListener('touchstart', onPress);
+    window.addEventListener('keydown', function(e) {
+        if (e.keyCode === 38 || e.keyCode === 32 || e.keyCode === 23 || e.keyCode === 13) {
+            onPress(); e.preventDefault();
+        }
+    });
+
+    function drawText(text, x, y, size) {
+        ctx.font = "900 " + size + "px sans-serif";
+        ctx.textAlign = "center";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#000";
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = "#FFF";
+        ctx.fillText(text, x, y);
+    }
+
+    function loop() {
+        // 🚀 팝업이 떠 있으면 게임의 프레임과 타이머를 멈춰서 완벽한 일시정지(Pause)를 구현합니다!
+        if(isExitPopupShowing) {
+            setTimeout(loop, 1000 / 60);
+            return;
+        }
+
+        ctx.fillStyle = currentBg === 0 ? "#4ec0ca" : "#008793";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        var hideForestOffset = 120;
+
+        for(var i=0; i <= canvas.width / 288 + 1; i++) {
+            ctx.drawImage(sprite, themes.bgX[currentBg], 0, 288, 512,
+                          i * 288, canvas.height - ground.height - 512 + hideForestOffset, 288, 512);
+        }
+
+        if (gameState === 1) {
+            pipes.update();
+            bird.update();
+        }
+
+        pipes.draw();
+        ground.draw();
+        bird.draw();
+
+        if (gameState === 0) {
+            ctx.drawImage(sprite, 584, 116, 196, 62, canvas.width/2 - 98, canvas.height/2 - 80, 196, 62);
+            ctx.drawImage(sprite, 584, 182, 114, 98, canvas.width/2 - 57, canvas.height/2, 114, 98);
+        } else if (gameState === 1) {
+            drawText(score, canvas.width / 2, 50, 42);
+        } else if (gameState === 2) {
+            ctx.drawImage(sprite, 784, 116, 204, 54, canvas.width/2 - 102, canvas.height/2 - 100, 204, 54);
+            ctx.drawImage(sprite, 0, 516, 238, 126, canvas.width/2 - 119, canvas.height/2 - 30, 238, 126);
+
+            drawText(score, canvas.width/2 + 75, canvas.height/2 + 20, 24);
+            drawText(bestScore, canvas.width/2 + 75, canvas.height/2 + 65, 24);
+
+            if (score >= 10) {
+                var mSx = 224, mSy = 906;
+                if (score >= 40) { mSx = 242; mSy = 516; }
+                else if (score >= 30) { mSx = 242; mSy = 564; }
+                else if (score >= 20) { mSx = 224; mSy = 954; }
+
+                ctx.drawImage(sprite, mSx, mSy, 44, 44, canvas.width/2 - 87, canvas.height/2 + 13, 44, 44);
+            }
+
+            if (isNewBest) {
+                ctx.drawImage(sprite, 224, 1002, 32, 14, canvas.width/2 + 25, canvas.height/2 + 25, 32, 14);
+            }
+        }
+
+        frames++;
+        setTimeout(loop, 1000 / 60);
+    }
+
+    sprite.onload = function() {
+        loop();
+    };
+</script>
+</body>
+</html>

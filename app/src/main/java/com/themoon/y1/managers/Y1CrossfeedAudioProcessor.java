@@ -37,8 +37,12 @@ public class Y1CrossfeedAudioProcessor implements AudioProcessor {
     public AudioFormat configure(AudioFormat inputAudioFormat) throws UnhandledAudioFormatException {
         pendingAudioFormat = inputAudioFormat;
 
-        // 🚀 [폭탄 완전 해체] 16비트 스테레오일 때만 수학 공식을 세팅하고, 아니면 조용히 프리패스를 준비합니다. (Exception 절대 금지)
-        isFormatSupported = (inputAudioFormat.encoding == com.google.android.exoplayer2.C.ENCODING_PCM_16BIT && inputAudioFormat.channelCount == 2);
+        // 🚀 [폭탄 완전 해체] 16비트 스테레오일 때만 수학 공식을 세팅합니다!
+        // 🚀 [V3 추가 방어막] 96kHz 이상의 고음질은 200MHz CPU에서 연산 시 무조건 렉이 발생합니다.
+        // 따라서 48kHz 이하의 음원(MP3 등)에서만 작동하도록 강제 차단합니다!
+        isFormatSupported = (inputAudioFormat.encoding == com.google.android.exoplayer2.C.ENCODING_PCM_16BIT) 
+                            && (inputAudioFormat.channelCount == 2)
+                            && (inputAudioFormat.sampleRate <= 48000);
 
         if (isFormatSupported) {
             float fc = 700.0f;

@@ -206,10 +206,18 @@ public class FmRadioManager {
                 fmPlayer.release();
             }
             fmPlayer = new MediaPlayer();
+
+            // =========================================================
+            // 🚀 [라디오 백그라운드 무한 재생 보호막 장착!]
+            // 화면이 꺼졌을 때 안드로이드 시스템이 MediaPlayer를 잠재우는 것을 막기 위해,
+            // WakeMode를 'PARTIAL_WAKE_LOCK'으로 강제 세팅하여 CPU가 계속 소리를 뿜어내도록 만듭니다!
+            // =========================================================
+            fmPlayer.setWakeMode(context, android.os.PowerManager.PARTIAL_WAKE_LOCK);
+
             // 💡 미디어텍 전용 숨겨진 FM 라디오 오디오 스트림 주소
             fmPlayer.setDataSource("MEDIATEK://MEDIAPLAYER_PLAYERTYPE_FM");
 
-            // 💡 숨겨진 STREAM_FM(보통 10번) 채널을 찾아서 볼륨을 물리립니다.
+            // 💡 숨겨진 STREAM_FM(보통 10번) 채널을 찾아서 볼륨을 물립니다.
             int streamFm = 10;
             try { streamFm = (Integer) AudioManager.class.getDeclaredField("STREAM_FM").get(null); } catch (Exception e) {}
 
