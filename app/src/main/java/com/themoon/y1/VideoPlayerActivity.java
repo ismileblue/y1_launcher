@@ -119,6 +119,15 @@ public class VideoPlayerActivity extends Activity {
 
             SharedPreferences prefs = getSharedPreferences("y1_prefs", MODE_PRIVATE);
             int savedPos = prefs.getInt("video_pos_" + videoPath, 0);
+            
+            if (savedPos > 0) {
+                int duration = mp.getDuration();
+                if (duration > 0 && savedPos >= duration - 5000) {
+                    savedPos = 0;
+                    prefs.edit().putInt("video_pos_" + videoPath, 0).apply();
+                }
+            }
+            
             if (savedPos > 0) {
                 mp.seekTo(savedPos);
                 lastKnownPosition = savedPos;
@@ -136,7 +145,11 @@ public class VideoPlayerActivity extends Activity {
             return false;
         });
 
-        videoView.setOnCompletionListener(mp -> finish());
+        videoView.setOnCompletionListener(mp -> {
+            getSharedPreferences("y1_prefs", MODE_PRIVATE).edit().putInt("video_pos_" + videoPath, 0).apply();
+            lastKnownPosition = 0;
+            finish();
+        });
     }
 
     private Runnable hideUITask = () -> {
@@ -188,6 +201,29 @@ public class VideoPlayerActivity extends Activity {
         int currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
         layoutVolumeOverlay.setVisibility(View.VISIBLE);
         volumeProgress.setProgress(currentVol);
+        
+        // 테마 색상 적용 및 밝기 보정
+        try {
+            int baseColor = com.themoon.y1.ThemeManager.getListButtonFocusedBg();
+            int r = android.graphics.Color.red(baseColor);
+            int g = android.graphics.Color.green(baseColor);
+            int b = android.graphics.Color.blue(baseColor);
+            
+            // 명도(Luma)가 100 미만으로 너무 어두우면 밝게 보정
+            if ((r * 0.299 + g * 0.587 + b * 0.114) < 100) {
+                r = Math.min(255, r + 80);
+                g = Math.min(255, g + 80);
+                b = Math.min(255, b + 80);
+            }
+            int finalColor = android.graphics.Color.argb(255, r, g, b);
+            
+            if (android.os.Build.VERSION.SDK_INT >= 21) {
+                volumeProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(finalColor));
+            } else {
+                volumeProgress.getProgressDrawable().setColorFilter(finalColor, android.graphics.PorterDuff.Mode.SRC_IN);
+            }
+        } catch (Exception e) {}
+
         volumeHandler.removeCallbacks(hideVolumeTask);
         volumeHandler.postDelayed(hideVolumeTask, 2000); // 2초 뒤에 사라짐
     }
@@ -363,8 +399,13 @@ public class VideoPlayerActivity extends Activity {
         super.onPause();
         com.themoon.y1.managers.BatteryStatsManager.getInstance(this).setMode(com.themoon.y1.managers.BatteryStatsManager.MODE_MUSIC);
         if (videoPath != null && lastKnownPosition > 0) {
+            int duration = videoView != null ? videoView.getDuration() : 0;
+            int posToSave = lastKnownPosition;
+            if (duration > 0 && posToSave >= duration - 5000) {
+                posToSave = 0;
+            }
             getSharedPreferences("y1_prefs", MODE_PRIVATE).edit()
-                    .putInt("video_pos_" + videoPath, lastKnownPosition)
+                    .putInt("video_pos_" + videoPath, posToSave)
                     .apply();
         }
     }
@@ -377,8 +418,13 @@ public class VideoPlayerActivity extends Activity {
         volumeHandler.removeCallbacks(hideVolumeTask);
         if (videoView != null) {
             if (videoPath != null && lastKnownPosition > 0) {
+                int duration = videoView.getDuration();
+                int posToSave = lastKnownPosition;
+                if (duration > 0 && posToSave >= duration - 5000) {
+                    posToSave = 0;
+                }
                 getSharedPreferences("y1_prefs", MODE_PRIVATE).edit()
-                        .putInt("video_pos_" + videoPath, lastKnownPosition)
+                        .putInt("video_pos_" + videoPath, posToSave)
                         .apply();
             }
             videoView.stopPlayback();

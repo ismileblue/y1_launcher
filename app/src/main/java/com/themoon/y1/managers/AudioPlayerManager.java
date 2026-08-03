@@ -1,7 +1,5 @@
 package com.themoon.y1.managers;
 
-import com.themoon.y1.StoragePaths;
-
 import android.content.Context;
 import android.media.AudioManager;
 import android.media.MediaMetadataRetriever;
@@ -377,7 +375,7 @@ public class AudioPlayerManager {
 
                     // 2. 에피소드 전용 이미지가 없다면? 우리가 기기에 이미 받아둔 채널 간판(cover.jpg)을 띄웁니다!
                     if (bmp == null) {
-                        java.io.File coverFile = new java.io.File(StoragePaths.getPodcastChannelDir(safeChannel), "cover.jpg");
+                        java.io.File coverFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, "cover.jpg");
                         if (coverFile.exists()) {
                             android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
                             opts.inJustDecodeBounds = true;
@@ -628,7 +626,7 @@ public class AudioPlayerManager {
             // 🖼️ [2구역] 화면 UI 덮어쓰기 (무조건 실행됨!)
             // ==========================================
             String safeFileName = track.getName().replace(".mp3", "").replace(".flac", "").replace(".wav", "").replace(".m4a", "").replace(".opus", "").replace(".m4b", "");
-            File coverFile = new File(StoragePaths.getCoversDir(), safeFileName + ".jpg");
+            File coverFile = new File("/storage/sdcard0/Y1_Covers", safeFileName + ".jpg");
 
             // 🚀 [팟캐스트 초고속 렌더링 지름길 장착!]
             boolean isPodcast = track.getAbsolutePath().contains("/Podcasts/");
@@ -651,9 +649,9 @@ public class AudioPlayerManager {
                     String parentName = track.getParentFile().getParentFile().getName();
                     String folderName = track.getParentFile().getName();
 
-                    if (parentName != null && !parentName.equals("Music") && !parentName.equals("Audiobooks") && !StoragePaths.isStorageVolumeName(parentName) && !parentName.equals("Y1_Playlists")) {
+                    if (parentName != null && !parentName.equals("Music") && !parentName.equals("Audiobooks") && !parentName.equals("sdcard0") && !parentName.equals("Y1_Playlists")) {
                         a = parentName;
-                    } else if (folderName != null && !folderName.equals("Music") && !folderName.equals("Audiobooks") && !StoragePaths.isStorageVolumeName(folderName) && !folderName.equals("Y1_Playlists")) {
+                    } else if (folderName != null && !folderName.equals("Music") && !folderName.equals("Audiobooks") && !folderName.equals("sdcard0") && !folderName.equals("Y1_Playlists")) {
                         a = folderName;
                     }
                 } catch (Exception e) {}
@@ -816,6 +814,11 @@ public class AudioPlayerManager {
             exoPlayer.setShuffleModeEnabled(isShuffle);
 
             int savedPos = main.prefs.getInt("book_pos_" + track.getAbsolutePath(), 0);
+            int savedDur = main.prefs.getInt("book_dur_" + track.getAbsolutePath(), 0);
+            if (savedPos > 0 && savedDur > 0 && savedPos >= savedDur - 5000) {
+                savedPos = 0;
+                main.prefs.edit().putInt("book_pos_" + track.getAbsolutePath(), 0).apply();
+            }
             if (savedPos > 0 && (main.isAudiobookLibraryMode || track.getAbsolutePath().contains("/Audiobooks"))) {
                 exoPlayer.seekTo(savedPos);
             }
@@ -858,12 +861,19 @@ public class AudioPlayerManager {
                     String filePath = main.currentPlaylist.get(main.currentIndex).getAbsolutePath();
 
                     // 🚀 [수정] 오디오북 폴더, 팟캐스트 로컬 폴더, 팟캐스트 스트리밍 주소까지 모두 저장 허용!
-                    if (StoragePaths.isUnderAudiobooks(filePath) || filePath.contains("/Podcasts") || filePath.startsWith("/PODCAST_STREAM") || main.isAudiobookLibraryMode) {
-                        AudiobookManager.getInstance(main).saveBookmark(filePath, getCurrentPosition(), main.currentIndex);
+                    if (filePath.startsWith("/storage/sdcard0/Audiobooks") || filePath.contains("/Podcasts") || filePath.startsWith("/PODCAST_STREAM") || main.isAudiobookLibraryMode) {
+                        int pos = getCurrentPosition();
+                        int dur = getDuration();
+                        // If it's near the end (e.g. less than 5 seconds remaining), save 0 so it starts from the beginning next time
+                        if (dur > 0 && pos >= dur - 5000) {
+                            pos = 0;
+                        }
+
+                        AudiobookManager.getInstance(main).saveBookmark(filePath, pos, main.currentIndex);
 
                         main.prefs.edit()
-                                .putInt("book_pos_" + filePath, getCurrentPosition())
-                                .putInt("book_dur_" + filePath, getDuration())
+                                .putInt("book_pos_" + filePath, pos)
+                                .putInt("book_dur_" + filePath, dur)
                                 .apply();
                     }
                 }

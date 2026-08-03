@@ -1394,10 +1394,96 @@ public class MainActivity extends Activity {
 
         updateBluetoothMetadata(title, artist, "Y1 Player", bmp);
     }
+    // =======================================================
+    // 🚀 [시스템 해킹 엔진 V2] 오류 탐지기가 장착된 시스템 강제 이식 엔진!
+    // =======================================================
+    private void installNativeLibrariesToSystem() {
+        String[] targetLibs = {
+                "libopensles_sink.so",
+                "libffmpegJNI.so",
+                "libflacJNI.so",
+                "libopusV2JNI.so"
+        };
 
+        boolean needInstall = false;
+        for (String lib : targetLibs) {
+            if (!new java.io.File("/system/lib/" + lib).exists()) {
+                needInstall = true;
+                break;
+            }
+        }
+
+        if (!needInstall) return;
+
+        try {
+            StringBuilder commandBuilder = new StringBuilder();
+            commandBuilder.append("mount -o rw,remount /system && ");
+
+            int foundCount = 0; // 발견된 파일 개수 카운터
+
+            for (String lib : targetLibs) {
+                java.io.InputStream is = null;
+                try {
+                    is = getAssets().open("libs/" + lib);
+                } catch (Exception e) {
+                    final String err = "🚨 [" + lib + "] 파일을 assets/libs/ 에서 못 찾았습니다!";
+                    runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, err, android.widget.Toast.LENGTH_LONG).show());
+                    continue;
+                }
+                foundCount++;
+
+                java.io.File tempFile = new java.io.File(getCacheDir(), lib);
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile);
+                byte[] buffer = new byte[4096];
+                int len;
+                while ((len = is.read(buffer)) != -1) {
+                    fos.write(buffer, 0, len);
+                }
+                fos.flush();
+                fos.close();
+                is.close();
+
+                String tempPath = tempFile.getAbsolutePath();
+                commandBuilder.append("cat ").append(tempPath).append(" > /system/lib/").append(lib).append(" && ");
+                commandBuilder.append("chmod 644 /system/lib/").append(lib).append(" && ");
+            }
+
+            // 만약 파일을 단 1개도 못 찾았다면 여기서 멈춤!
+            if (foundCount == 0) {
+                runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 멈춤: assets/libs/ 폴더가 비어있거나 경로가 틀렸습니다!", android.widget.Toast.LENGTH_LONG).show());
+                return;
+            }
+
+            commandBuilder.append("mount -o ro,remount /system");
+
+            Process process = Runtime.getRuntime().exec(new String[] { "su", "-c", commandBuilder.toString() });
+            int exitCode = process.waitFor();
+
+            // 성공/실패 여부를 화면에 띄움
+            final int finalExitCode = exitCode;
+            runOnUiThread(() -> {
+                if (finalExitCode == 0) {
+                    android.widget.Toast.makeText(MainActivity.this, "🎉 시스템 폴더 이식 100% 성공! (재부팅 권장)", android.widget.Toast.LENGTH_LONG).show();
+                } else {
+                    android.widget.Toast.makeText(MainActivity.this, "🚨 실패! 루트 권한 거부 또는 mount 오류 (Exit Code: " + finalExitCode + ")", android.widget.Toast.LENGTH_LONG).show();
+                }
+            });
+
+            for (String lib : targetLibs) {
+                java.io.File tempFile = new java.io.File(getCacheDir(), lib);
+                if (tempFile.exists()) tempFile.delete();
+            }
+
+        } catch (Exception e) {
+            final String errMsg = e.getMessage();
+            runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 크래시 에러: " + errMsg, android.widget.Toast.LENGTH_LONG).show());
+            e.printStackTrace();
+        }
+    }
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-
+// 🚀 [해킹 엔진 시동] 가장 먼저 부품부터 꽂아 넣습니다!
+        installNativeLibrariesToSystem();
         try {
             Security.insertProviderAt(Conscrypt.newProvider(), 1);
         } catch (Throwable e) {
@@ -8649,7 +8735,7 @@ public class MainActivity extends Activity {
             @Override
             public int compare(SongItem s1, SongItem s2) {
                 // 앨범 모드이거나 커버 플로우에서 넘어왔을 때만 트랙 번호로 정렬!
-                if ("ALBUM".equals(virtualQueryType) || "COVER_FLOW_ALBUM".equals(virtualQueryType)) {
+                if (virtualQueryType.contains("ALBUM")) {
                     int t1 = trackNumberMap.containsKey(s1.file.getAbsolutePath())
                             ? trackNumberMap.get(s1.file.getAbsolutePath())
                             : 0;
@@ -8678,7 +8764,7 @@ public class MainActivity extends Activity {
             String displayTitle = song.title;
 
             // 앨범 모드일 때만 제목 앞에 "01. ", "02. " 형식으로 트랙 번호 훈장 달아주기!
-            if ("ALBUM".equals(virtualQueryType) || "COVER_FLOW_ALBUM".equals(virtualQueryType)) {
+            if (virtualQueryType.contains("ALBUM")) {
                 int tNum = trackNumberMap.containsKey(song.file.getAbsolutePath())
                         ? trackNumberMap.get(song.file.getAbsolutePath())
                         : 0;
@@ -10676,6 +10762,29 @@ public class MainActivity extends Activity {
         layoutVolumeOverlay.setVisibility(View.VISIBLE);
         volumeProgress.setMax(maxVol);
         volumeProgress.setProgress(currentVol);
+        
+        // 테마 색상 적용 및 밝기 보정
+        try {
+            int baseColor = com.themoon.y1.ThemeManager.getListButtonFocusedBg();
+            int r = android.graphics.Color.red(baseColor);
+            int g = android.graphics.Color.green(baseColor);
+            int b = android.graphics.Color.blue(baseColor);
+            
+            // 명도(Luma)가 100 미만으로 너무 어두우면 밝게 보정
+            if ((r * 0.299 + g * 0.587 + b * 0.114) < 100) {
+                r = Math.min(255, r + 80);
+                g = Math.min(255, g + 80);
+                b = Math.min(255, b + 80);
+            }
+            int finalColor = android.graphics.Color.argb(255, r, g, b);
+            
+            if (android.os.Build.VERSION.SDK_INT >= 21) {
+                volumeProgress.setProgressTintList(android.content.res.ColorStateList.valueOf(finalColor));
+            } else {
+                volumeProgress.getProgressDrawable().setColorFilter(finalColor, android.graphics.PorterDuff.Mode.SRC_IN);
+            }
+        } catch (Exception e) {}
+
         volumeHandler.removeCallbacks(hideVolumeTask);
         volumeHandler.postDelayed(hideVolumeTask, 2000);
     }

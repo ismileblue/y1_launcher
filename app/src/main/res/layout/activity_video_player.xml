@@ -43,28 +43,38 @@
     <!-- 🚀 메인 앱과 100% 똑같은 오리지널 커스텀 볼륨창 -->
     <LinearLayout
         android:id="@+id/layout_volume_overlay"
-        android:layout_width="220dp"
-        android:layout_height="wrap_content"
+        android:layout_width="300dp"
+        android:layout_height="50dp"
         android:layout_centerInParent="true"
-        android:background="#CC000000"
-        android:orientation="vertical"
-        android:padding="20dp"
-        android:gravity="center"
+        android:background="@drawable/bg_volume_popup"
+        android:orientation="horizontal"
+        android:paddingLeft="20dp"
+        android:paddingRight="20dp"
+        android:gravity="center_vertical"
         android:visibility="gone">
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Volume"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:layout_marginBottom="10dp"/>
+        
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_volume_down"
+            android:scaleType="fitCenter"/>
+
         <ProgressBar
             android:id="@+id/volume_progress"
             style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="15dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="12dp"
+            android:layout_marginLeft="15dp"
+            android:layout_marginRight="15dp"
             android:max="15"
             android:progress="10"/>
+            
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_volume_up"
+            android:scaleType="fitCenter"/>
     </LinearLayout>
 
     <!-- 🚀 재생 정보 오버레이 패널 (시간 + 프로그레스 바) -->

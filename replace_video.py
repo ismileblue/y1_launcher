@@ -116,11 +116,31 @@ public class VideoPlayerActivity extends Activity {
         // 🚀 이어보기 (Resume Playback) 복원 로직
         SharedPreferences prefs = getSharedPreferences("y1_prefs", MODE_PRIVATE);
         int savedPos = prefs.getInt("video_pos_" + videoPath, 0);
+        
         if (savedPos > 0) {
             player.seekTo(savedPos);
         }
 
         player.prepare();
+        
+        if (savedPos > 0) {
+            int duration = (int) player.getDuration();
+            if (duration > 0 && savedPos >= duration - 5000) {
+                savedPos = 0;
+                player.seekTo(0);
+                prefs.edit().putInt("video_pos_" + videoPath, 0).apply();
+            }
+        }
+        
+        player.addListener(new com.google.android.exoplayer2.Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int state) {
+                if (state == com.google.android.exoplayer2.Player.STATE_ENDED) {
+                    getSharedPreferences("y1_prefs", MODE_PRIVATE).edit().putInt("video_pos_" + videoPath, 0).apply();
+                    finish();
+                }
+            }
+        });
         player.play();
 
         playerView.setOnClickListener(v -> {
@@ -335,8 +355,11 @@ public class VideoPlayerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (player != null && videoPath != null) {
+            int dur = (int) player.getDuration();
+            int pos = (int) player.getCurrentPosition();
+            if (dur > 0 && pos >= dur - 5000) pos = 0;
             getSharedPreferences("y1_prefs", MODE_PRIVATE).edit()
-                .putInt("video_pos_" + videoPath, (int) player.getCurrentPosition())
+                .putInt("video_pos_" + videoPath, pos)
                 .apply();
             player.pause();
         }
@@ -349,8 +372,11 @@ public class VideoPlayerActivity extends Activity {
         uiHandler.removeCallbacks(hideUITask);
         volumeHandler.removeCallbacks(hideVolumeTask);
         if (player != null) {
+            int dur = (int) player.getDuration();
+            int pos = (int) player.getCurrentPosition();
+            if (dur > 0 && pos >= dur - 5000) pos = 0;
             getSharedPreferences("y1_prefs", MODE_PRIVATE).edit()
-                .putInt("video_pos_" + videoPath, (int) player.getCurrentPosition())
+                .putInt("video_pos_" + videoPath, pos)
                 .apply();
             player.release();
             player = null;
