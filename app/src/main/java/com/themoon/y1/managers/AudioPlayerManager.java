@@ -38,6 +38,22 @@ public class AudioPlayerManager {
     public Y1CrossfeedAudioProcessor crossfeedProcessor = new Y1CrossfeedAudioProcessor();
 
     private float currentSpeed = 1.0f;
+    
+    // 🚀 [취침 예약 타이머]
+    private Handler sleepTimerHandler = new Handler(android.os.Looper.getMainLooper());
+    private Runnable sleepTimerRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (MainActivity.instance != null) {
+                MainActivity.instance.isPausedByHand = true;
+                if (exoPlayer != null) exoPlayer.setPlayWhenReady(false);
+            } else if (exoPlayer != null) {
+                exoPlayer.setPlayWhenReady(false);
+            }
+            cancelSleepTimer(); // 타이머 초기화
+        }
+    };
+    private boolean isSleepTimerActive = false;
 
     private AudioPlayerManager() {}
 
@@ -899,8 +915,30 @@ public class AudioPlayerManager {
     }
 
     public boolean isPlaying() {
-        if (exoPlayer != null) return exoPlayer.getPlayWhenReady();
-        return false;
+        return exoPlayer != null && exoPlayer.getPlayWhenReady();
+    }
+
+
+    public float getPlaybackSpeed() {
+        return currentSpeed;
+    }
+
+    // 🚀 [취침 예약 엔진]
+    public void startSleepTimer(int minutes) {
+        cancelSleepTimer(); // 기존 타이머 취소
+        if (minutes > 0) {
+            isSleepTimerActive = true;
+            sleepTimerHandler.postDelayed(sleepTimerRunnable, minutes * 60 * 1000L);
+        }
+    }
+
+    public void cancelSleepTimer() {
+        isSleepTimerActive = false;
+        sleepTimerHandler.removeCallbacks(sleepTimerRunnable);
+    }
+    
+    public boolean isSleepTimerActive() {
+        return isSleepTimerActive;
     }
 
     public int getAudioSessionId() {

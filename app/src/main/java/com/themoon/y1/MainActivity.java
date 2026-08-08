@@ -101,6 +101,9 @@ public class MainActivity extends Activity {
     public LinearLayout layoutShuffleRepeatOverlay;
     public Button btnOverlayShuffle;
     public Button btnOverlayRepeat;
+    public Button btnOverlaySpeed;
+    public Button btnOverlaySleep;
+    private int currentSleepTimerMinutes = 0;
     // =========================================================
     // 🚀 [신규 추가] 연도/장르 3단 딥 다이브 전용 모드 및 기억 금고!
     // =========================================================
@@ -1688,6 +1691,13 @@ public class MainActivity extends Activity {
             isShuffleMode = prefs.getBoolean("shuffle", false);
         } catch (Exception e) {
         }
+        
+        try {
+            float speed = prefs.getFloat("playback_speed", 1.0f);
+            if (com.themoon.y1.managers.AudioPlayerManager.getInstance() != null) {
+                com.themoon.y1.managers.AudioPlayerManager.getInstance().setPlaybackSpeed(speed);
+            }
+        } catch (Exception e) {}
 
         try {
             if (prefs.contains("repeat_mode")) {
@@ -2406,24 +2416,29 @@ public class MainActivity extends Activity {
         // 우리가 뚫어놓은 만능 버튼 생성기 재활용!
         btnOverlayShuffle = createListButton("");
         btnOverlayRepeat = createListButton("");
+        btnOverlaySpeed = createListButton("");
+        btnOverlaySleep = createListButton("");
 
         // 🚀 [취소 방어막 및 조향 장치] 팝업이 떴을 때 휠(21, 22)로 버튼 이동, 백/메뉴 버튼으로 창 닫기!
+        final Button[] overlayBtns = {btnOverlayShuffle, btnOverlayRepeat, btnOverlaySpeed, btnOverlaySleep};
         View.OnKeyListener closeOverlayListener = new View.OnKeyListener() {
             @Override
             public boolean onKey(View v, int keyCode, KeyEvent event) {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (keyCode == 21 || keyCode == 19 || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                        if (btnOverlayShuffle != null) {
-                            btnOverlayShuffle.requestFocus();
-                            clickFeedback();
-                        }
+                        int idx = -1;
+                        for (int i = 0; i < overlayBtns.length; i++) if (overlayBtns[i] == v) idx = i;
+                        if (idx > 0) overlayBtns[idx - 1].requestFocus();
+                        else overlayBtns[overlayBtns.length - 1].requestFocus();
+                        clickFeedback();
                         return true;
                     }
                     if (keyCode == 22 || keyCode == 20 || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                        if (btnOverlayRepeat != null) {
-                            btnOverlayRepeat.requestFocus();
-                            clickFeedback();
-                        }
+                        int idx = -1;
+                        for (int i = 0; i < overlayBtns.length; i++) if (overlayBtns[i] == v) idx = i;
+                        if (idx >= 0 && idx < overlayBtns.length - 1) overlayBtns[idx + 1].requestFocus();
+                        else overlayBtns[0].requestFocus();
+                        clickFeedback();
                         return true;
                     }
                     if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_MENU) {
@@ -2435,8 +2450,9 @@ public class MainActivity extends Activity {
                 return false;
             }
         };
-        btnOverlayShuffle.setOnKeyListener(closeOverlayListener);
-        btnOverlayRepeat.setOnKeyListener(closeOverlayListener);
+        for (Button b : overlayBtns) {
+            if (b != null) b.setOnKeyListener(closeOverlayListener);
+        }
 
         // 🚀 [적용 및 실시간 모드 변환 엔진] 가운데 버튼을 누를 때 창을 닫지 않고 상태만 계속 토글합니다!
         btnOverlayShuffle.setOnClickListener(v -> {
@@ -2458,9 +2474,51 @@ public class MainActivity extends Activity {
             String[] repText = {"OFF", "ONE", "ALL"};
             btnOverlayRepeat.setText("🔁 " + t("Repeat") + ": " + t(repText[repeatMode]));
         });
+        
+        btnOverlaySpeed.setOnClickListener(v -> {
+            clickFeedback();
+            float current = 1.0f;
+            if (com.themoon.y1.managers.AudioPlayerManager.getInstance() != null) {
+                current = com.themoon.y1.managers.AudioPlayerManager.getInstance().getPlaybackSpeed();
+            }
+            float nextSpeed = 1.0f;
+            if (current == 1.0f) nextSpeed = 1.2f;
+            else if (current == 1.2f) nextSpeed = 1.5f;
+            else nextSpeed = 1.0f;
+            
+            if (com.themoon.y1.managers.AudioPlayerManager.getInstance() != null) {
+                com.themoon.y1.managers.AudioPlayerManager.getInstance().setPlaybackSpeed(nextSpeed);
+            }
+            try { prefs.edit().putFloat("playback_speed", nextSpeed).commit(); } catch (Exception e) {}
+            btnOverlaySpeed.setText("⏩ " + t("Speed") + ": " + nextSpeed + "x");
+            Toast.makeText(MainActivity.this, t("Speed set to ") + nextSpeed + "x", Toast.LENGTH_SHORT).show();
+        });
+        
+        btnOverlaySleep.setOnClickListener(v -> {
+            clickFeedback();
+            if (currentSleepTimerMinutes == 0) currentSleepTimerMinutes = 15;
+            else if (currentSleepTimerMinutes == 15) currentSleepTimerMinutes = 30;
+            else if (currentSleepTimerMinutes == 30) currentSleepTimerMinutes = 60;
+            else currentSleepTimerMinutes = 0;
+            
+            if (currentSleepTimerMinutes == 0) {
+                if (com.themoon.y1.managers.AudioPlayerManager.getInstance() != null) {
+                    com.themoon.y1.managers.AudioPlayerManager.getInstance().cancelSleepTimer();
+                }
+                btnOverlaySleep.setText("💤 " + t("Sleep Timer") + ": " + t("OFF"));
+                Toast.makeText(MainActivity.this, t("Sleep timer cancelled"), Toast.LENGTH_SHORT).show();
+            } else {
+                if (com.themoon.y1.managers.AudioPlayerManager.getInstance() != null) {
+                    com.themoon.y1.managers.AudioPlayerManager.getInstance().startSleepTimer(currentSleepTimerMinutes);
+                    Toast.makeText(MainActivity.this, t("Sleep timer set for ") + currentSleepTimerMinutes + t(" minutes"), Toast.LENGTH_SHORT).show();
+                }
+                btnOverlaySleep.setText("💤 " + t("Sleep Timer") + ": " + currentSleepTimerMinutes + "m");
+            }
+        });
 
-        layoutShuffleRepeatOverlay.addView(btnOverlayShuffle);
-        layoutShuffleRepeatOverlay.addView(btnOverlayRepeat);
+        for (Button b : overlayBtns) {
+            if (b != null) layoutShuffleRepeatOverlay.addView(b);
+        }
 
         FrameLayout.LayoutParams overlayLpTop = new FrameLayout.LayoutParams(
                 (int)(260 * dOver), // 적당한 가로 넓이
@@ -5927,7 +5985,7 @@ public class MainActivity extends Activity {
                     }
                     if (fmManager.powerUp(fmManager.currentFreq)) {
                         activePlayer = 1;
-                        setVolumeControlStream(fmManager.getFmStreamType());
+                        setVolumeControlStream(AudioManager.STREAM_MUSIC);
                     } else
                         Toast.makeText(MainActivity.this, "Radio Error: " + fmManager.lastError,
                                 Toast.LENGTH_LONG).show();
@@ -6076,14 +6134,14 @@ public class MainActivity extends Activity {
                 clickFeedback();
                 fmManager.setSpeaker(!fmManager.isSpeakerOn);
                 setVolumeControlStream(fmManager.isPowerUp
-                        ? fmManager.getFmStreamType()
+                        ? AudioManager.STREAM_MUSIC
                         : AudioManager.STREAM_MUSIC);
                 buildRadioUI();
             });
             containerSettingsItems.addView(btnSpeaker);
 
             if (fmManager.isPowerUp) {
-                setVolumeControlStream(fmManager.getFmStreamType());
+                setVolumeControlStream(AudioManager.STREAM_MUSIC);
             }
 
             containerSettingsItems.postDelayed(() -> {
@@ -10262,6 +10320,18 @@ public class MainActivity extends Activity {
         String[] repText = {"OFF", "ONE", "ALL"};
         btnOverlayRepeat.setText("🔁 " + t("Repeat") + ": " + t(repText[repeatMode]));
 
+        float speed = 1.0f;
+        if (com.themoon.y1.managers.AudioPlayerManager.getInstance() != null) {
+            speed = com.themoon.y1.managers.AudioPlayerManager.getInstance().getPlaybackSpeed();
+        }
+        btnOverlaySpeed.setText("⏩ " + t("Speed") + ": " + speed + "x");
+
+        if (currentSleepTimerMinutes == 0) {
+            btnOverlaySleep.setText("💤 " + t("Sleep Timer") + ": " + t("OFF"));
+        } else {
+            btnOverlaySleep.setText("💤 " + t("Sleep Timer") + ": " + currentSleepTimerMinutes + "m");
+        }
+
         // 🚀 [그림자 및 테두리 입체 효과 갱신] 플레이어 배경 밝기에 맞춰 테두리 선명도를 조절하고 입체 그림자 적용
         if (layoutShuffleRepeatOverlay != null) {
             float dOver = getResources().getDisplayMetrics().density;
@@ -10722,7 +10792,7 @@ public class MainActivity extends Activity {
             com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager.getInstance(this);
             if (fm.isPowerUp) {
                 // FM plays on STREAM_FM; MUSIC volume (esp. speaker device index) can be 0 on Y2.
-                stream = fm.getFmStreamType();
+                stream = AudioManager.STREAM_MUSIC;
             }
         } catch (Exception e) {
         }
@@ -10753,7 +10823,7 @@ public class MainActivity extends Activity {
         try {
             com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager.getInstance(this);
             if (fm.isPowerUp) {
-                stream = fm.getFmStreamType();
+                stream = AudioManager.STREAM_MUSIC;
             }
         } catch (Exception e) {
         }
@@ -14007,7 +14077,62 @@ public class MainActivity extends Activity {
                 .create();
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        // 4. [첫 번째 버튼] 새 플레이리스트 만들기
+        // 4-1. 🚀 [신규 기능 1] 다음 곡으로 예약 재생 (Play Next)
+        View btnPlayNext = createListButtonWithIcon("\uE037", t("Play Next"));
+        btnPlayNext.setOnKeyListener(dialogWheelListener);
+        btnPlayNext.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                List<File> targetFiles = collectAudioFilesFromFileOrDir(songFile);
+                if (targetFiles.isEmpty()) {
+                    Toast.makeText(MainActivity.instance, t("No playable audio files found."), Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                    return;
+                }
+                if (currentPlaylist == null || currentPlaylist.isEmpty()) {
+                    com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackList(targetFiles, 0);
+                } else {
+                    int insertPos = Math.min(currentIndex + 1, currentPlaylist.size());
+                    currentPlaylist.addAll(insertPos, targetFiles);
+                    if (originalPlaylist != null) {
+                        originalPlaylist.addAll(targetFiles);
+                    }
+                    Toast.makeText(MainActivity.instance, t("Added to Play Next"), Toast.LENGTH_SHORT).show();
+                }
+                dialog.dismiss();
+            }
+        });
+        layout.addView(btnPlayNext);
+
+        // 4-2. 🚀 [신규 기능 2] 현재 재생 목록 끝에 추가 (Add to Queue)
+        View btnAddToQueue = createListButtonWithIcon("\uE03B", t("Add to Queue"));
+        btnAddToQueue.setOnKeyListener(dialogWheelListener);
+        btnAddToQueue.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                List<File> targetFiles = collectAudioFilesFromFileOrDir(songFile);
+                if (targetFiles.isEmpty()) {
+                    Toast.makeText(MainActivity.instance, t("No playable audio files found."), Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                    return;
+                }
+                if (currentPlaylist == null || currentPlaylist.isEmpty()) {
+                    com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackList(targetFiles, 0);
+                } else {
+                    currentPlaylist.addAll(targetFiles);
+                    if (originalPlaylist != null) {
+                        originalPlaylist.addAll(targetFiles);
+                    }
+                    Toast.makeText(MainActivity.instance, t("Added to Queue"), Toast.LENGTH_SHORT).show();
+                }
+                dialog.dismiss();
+            }
+        });
+        layout.addView(btnAddToQueue);
+
+        // 4-3. [기존 버튼] 새 플레이리스트 만들기
         View btnNew = createListButtonWithIcon("\uE145", t("Create New Playlist"));
         btnNew.setOnKeyListener(dialogWheelListener); // 🚀 버튼에 팝업 전용 조향 장치 연결!
         btnNew.setOnClickListener(new View.OnClickListener() {
@@ -14062,6 +14187,30 @@ public class MainActivity extends Activity {
         }, 50);
     }
 
+    // 🚀 [신규 엔진] 파일 또는 폴더에서 음원 파일들만 골라내는 스마트 수집기
+    public List<File> collectAudioFilesFromFileOrDir(File target) {
+        List<File> result = new ArrayList<>();
+        if (target == null || !target.exists()) return result;
+        if (target.isFile()) {
+            if (isAudioFile(target)) {
+                result.add(target);
+            }
+        } else if (target.isDirectory()) {
+            File[] files = target.listFiles();
+            if (files != null) {
+                java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+                for (File f : files) {
+                    if (f.isDirectory()) {
+                        result.addAll(collectAudioFilesFromFileOrDir(f));
+                    } else if (isAudioFile(f)) {
+                        result.add(f);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     // 🚀 [자체 플레이리스트 엔진 4단계] 실시간 하드디스크 물리 레코딩 스트림
     private void writeSongToM3uFile(File m3uFile, File songFile, boolean append) {
         try {
@@ -14073,8 +14222,14 @@ public class MainActivity extends Activity {
                 bw.write("#EXTM3U\n");
             }
 
-            // 곡의 절대 경로 주소를 안전하게 마킹한 뒤 줄 바꿈 처리
-            bw.write(songFile.getAbsolutePath() + "\n");
+            List<File> filesToWrite = collectAudioFilesFromFileOrDir(songFile);
+            if (filesToWrite.isEmpty() && songFile != null && songFile.exists()) {
+                filesToWrite.add(songFile);
+            }
+
+            for (File f : filesToWrite) {
+                bw.write(f.getAbsolutePath() + "\n");
+            }
             bw.close();
         } catch (Exception e) {
             e.printStackTrace();
