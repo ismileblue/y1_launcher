@@ -60,7 +60,7 @@ If you find any bugs or have suggestions, please **open an Issue** in this repos
 ## 🚀 Installation & Update Guide
 
 You can easily install the launcher using the **Innioasis Updater**.
-👉 [Download Innioasis Updater](https://www.innioasis.com/pages/download)
+Please perform the update using the updater program provided at https://innioasis.app/
 
 <img width="1214" height="612" alt="Installation Screenshot" src="https://github.com/user-attachments/assets/95e9e82a-7b2a-48ee-a75b-6f055a77db07" />
 
