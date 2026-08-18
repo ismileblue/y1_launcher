@@ -151,6 +151,16 @@ public class Y1WebServer extends Thread {
                             "<div id='status' style='margin-top:12px; color:#81C784; font-weight:600; font-size:14px;'></div>" +
                             "</div>" +
 
+                            // 🚀 [추가] Last.fm Login Box
+                            "<div class='box'>" +
+                            "<h3 style='margin-top:0; color:#B39DDB; font-size:16px;'>🎵 Last.fm Connect</h3>" +
+                            "<div style='display:flex; gap:8px;'>" +
+                            "<input type='text' id='lfmUser' placeholder='Username' style='flex:1;'>" +
+                            "<input type='password' id='lfmPass' placeholder='Password' style='flex:1; background:#2A2A35; color:#E0E0E0; border-radius:12px; padding:12px; font-size:14px; border:none; outline:none;'>" +
+                            "<button class='action' onclick='loginLastFm()'>Login</button>" +
+                            "</div>" +
+                            "</div>" +
+
                             // 파일 리스트 박스
                             "<div class='box' id='fileList'>Loading...</div>" +
 
@@ -248,7 +258,16 @@ public class Y1WebServer extends Thread {
                             "  e.stopPropagation();" +
                             "  var newName = prompt('Enter new name for: ' + oldName, oldName);" +
                             "  if(!newName || newName === oldName) return;" +
-                            "  fetch('/api/rename?dir=' + encodeURIComponent(currentPath) + '&old=' + encodeURIComponent(oldName) + '&new=' + encodeURIComponent(newName), {method:'POST'}).then(()=>loadList());" +
+                            "  fetch('/api/rename?dir=' + encodeURIComponent(currentPath) + '&old=' + encodeURIComponent(oldName) + '&new=' + encodeURIComponent(newName), {method:'POST'}).then(()=>{ loadList();});" +
+                            "}" +
+                            "function loginLastFm() {" +
+                            "  var u = document.getElementById('lfmUser').value;" +
+                            "  var p = document.getElementById('lfmPass').value;" +
+                            "  if(!u || !p) { alert('Please enter both username and password.'); return; }" +
+                            "  fetch('/api/lastfm_login?user=' + encodeURIComponent(u) + '&pass=' + encodeURIComponent(p), {method:'POST'}).then(r=>r.text()).then(res=>{" +
+                            "    if(res === 'OK') { alert('Last.fm Logged In Successfully!'); document.getElementById('lfmUser').value=''; document.getElementById('lfmPass').value=''; }" +
+                            "    else alert('Login Failed: ' + res);" +
+                            "  });" +
                             "}" +
                             "function deleteItem(e, name) { " +
                             "  e.stopPropagation();" +
@@ -399,7 +418,36 @@ public class Y1WebServer extends Thread {
                     os.write("HTTP/1.1 200 OK\r\n\r\nOK".getBytes("UTF-8"));
                 }
 
-                // 5️⃣ [API] 파일 읽기 (스트리밍, 다운로드, 코드 불러오기)
+                // 🚀 [추가] Last.fm API Login via Web
+                else if (method.equals("POST") && path.startsWith("/api/lastfm_login")) {
+                    String q = path.split("\\?")[1];
+                    String[] params = q.split("&");
+                    String user = "", pass = "";
+                    for (String p : params) {
+                        if (p.startsWith("user=")) user = URLDecoder.decode(p.substring(5), "UTF-8");
+                        if (p.startsWith("pass=")) pass = URLDecoder.decode(p.substring(5), "UTF-8");
+                    }
+                    
+                    final String[] result = new String[1];
+                    final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                    com.themoon.y1.managers.LastFmManager.getInstance(context).login(user, pass, new com.themoon.y1.managers.LastFmManager.LoginCallback() {
+                        @Override
+                        public void onSuccess() {
+                            result[0] = "OK";
+                            latch.countDown();
+                        }
+                        @Override
+                        public void onError(String errorMsg) {
+                            result[0] = errorMsg;
+                            latch.countDown();
+                        }
+                    });
+                    
+                    try { latch.await(15, java.util.concurrent.TimeUnit.SECONDS); } catch(Exception e){}
+                    if (result[0] == null) result[0] = "Timeout or Network Error";
+                    
+                    os.write(("HTTP/1.1 200 OK\r\n\r\n" + result[0]).getBytes("UTF-8"));
+                }
 
                 // 5️⃣ [API] 파일 읽기 (스트리밍, 다운로드, 코드 불러오기)
                 else if (method.equals("GET") && path.startsWith("/api/file")) {

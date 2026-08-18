@@ -350,5 +350,17 @@
     "Add to Queue": "Добавить в очередь",
     "Added to Play Next": "Добавлено в следующие",
     "Added to Queue": "Добавлено в очередь",
-    "No playable audio files found.": "Воспроизводимые аудиофайлы не найдены"
+    "No playable audio files found.": "Воспроизводимые аудиофайлы не найдены",
+    "Network Error: ": "Ошибка сети: ",
+    "Stream failed: ": "Ошибка стриминга: ",
+    "Unknown error": "Неизвестная ошибка",
+    "Play All Videos": "Воспроизвести все видео",
+    "Last.fm Login Guide": "Вход в Last.fm",
+    "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.": "Запустите беспроводную загрузку (веб-сервер) и войдите в Last.fm через браузер ПК или смартфона.",
+    "Start Web Server": "Запустить веб-сервер",
+    "Last.fm Logout": "Выйти из Last.fm",
+    "Are you sure you want to log out from Last.fm?": "Вы действительно хотите выйти из Last.fm?",
+    "Logout": "Выйти",
+    "Logged out": "Выход выполнен",
+    "Not logged in": "Не выполнен вход"
 }

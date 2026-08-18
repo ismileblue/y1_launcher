@@ -1,0 +1,243 @@
+﻿diff --git a/app/src/main/java/com/themoon/y1/MainActivity.java b/app/src/main/java/com/themoon/y1/MainActivity.java
+index 4e0afb6..8ad372e 100644
+--- a/app/src/main/java/com/themoon/y1/MainActivity.java
++++ b/app/src/main/java/com/themoon/y1/MainActivity.java
+@@ -1405,7 +1405,8 @@ public class MainActivity extends Activity {
+                 "libopensles_sink.so",
+                 "libffmpegJNI.so",
+                 "libflacJNI.so",
+-                "libopusV2JNI.so"
++                "libopusV2JNI.so",
++                "libconscrypt_jni.so"
+         };
+ 
+         boolean needInstall = false;
+@@ -7637,6 +7638,29 @@ public class MainActivity extends Activity {
+     // =======================================================
+     // 🚀 [팟캐스트 엔진 2단계] 인터넷 RSS 연결 및 에피소드 정밀 파서
+     // =======================================================
++    // 🚀 [작은 화면 최적화] 리스트 한 줄에서 제목 앞자리를 다 잡아먹던 긴 RSS 날짜("Wed, 13 Aug 2026")를
++    // "26.08.13" 형태로 압축해서 제목이 보이는 공간을 최대한 확보합니다.
++    private String formatPodcastDate(String rawPubDate) {
++        if (rawPubDate == null || rawPubDate.isEmpty())
++            return "";
++        String trimmed = rawPubDate.trim();
++        String[] patterns = {
++                "EEE, dd MMM yyyy HH:mm:ss Z",
++                "EEE, dd MMM yyyy HH:mm:ss zzz",
++                "dd MMM yyyy HH:mm:ss Z"
++        };
++        for (String pattern : patterns) {
++            try {
++                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat(pattern, java.util.Locale.US);
++                java.util.Date date = sdf.parse(trimmed);
++                return new java.text.SimpleDateFormat("yy.MM.dd", java.util.Locale.US).format(date);
++            } catch (Exception e) {
++            }
++        }
++        // 💡 파싱 실패 시(특이한 피드 포맷) 예전처럼 앞부분만 잘라서 안전하게 대체
++        return trimmed.length() > 16 ? trimmed.substring(0, 16) : trimmed;
++    }
++
+     private void buildPodcastEpisodesUI(final String channelName, final String rssUrl) {
+         scrollViewBrowser.setVisibility(View.GONE);
+         listVirtualSongs.setVisibility(View.VISIBLE);
+@@ -7720,9 +7744,7 @@ public class MainActivity extends Activity {
+                                 else if (insideItem && name.equalsIgnoreCase("title"))
+                                     title = parser.nextText();
+                                 else if (insideItem && name.equalsIgnoreCase("pubDate")) {
+-                                    pubDate = parser.nextText();
+-                                    if (pubDate.length() > 16)
+-                                        pubDate = pubDate.substring(0, 16);
++                                    pubDate = formatPodcastDate(parser.nextText());
+                                 } else if (insideItem && name.equalsIgnoreCase("enclosure"))
+                                     audioUrl = parser.getAttributeValue(null, "url");
+                                 // 🚀 [간판 훔치기 1] itunes:image 태그일 때
+@@ -7798,8 +7820,8 @@ public class MainActivity extends Activity {
+                         savePodcastCache(channelName, episodes);
+                     }
+                 } catch (final Exception e) {
+-                    // runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 통신
+-                    // 에러: " + e.toString(), android.widget.Toast.LENGTH_LONG).show());
++                    android.util.Log.e("PodcastFetch", "RSS fetch/parse failed for " + rssUrl, e);
++                    runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 통신 에러: " + e.toString(), android.widget.Toast.LENGTH_LONG).show());
+                 }
+ 
+                 runOnUiThread(new Runnable() {
+@@ -11567,7 +11589,13 @@ public class MainActivity extends Activity {
+ 
+                             // 💡 위에 있는 항목이 완전히 화면에 보일 때는 평범하게 포커스만!
+                             if (vis >= 0 && vis < listVirtualSongs.getChildCount()) {
+-                                listVirtualSongs.getChildAt(vis).requestFocus();
++                                // 🚀 [포커스 되돌아가기 버그 완전 해결] requestFocus()만 호출하면 ListView 내부의
++                                // 선택 위치(mSelectedPosition)가 갱신되지 않아, 다음 레이아웃 패스(마퀴 텍스트
++                                // 스크롤 등으로 수시로 발생)때 ListView가 포커스를 예전 위치로 되돌려버립니다.
++                                // setSelectionFromTop으로 내부 상태부터 동기화한 뒤 포커스를 줍니다.
++                                View target = listVirtualSongs.getChildAt(vis);
++                                listVirtualSongs.setSelectionFromTop(prevPos, target.getTop());
++                                target.requestFocus();
+                             } else {
+                                 // 🚀 [스크롤 널뛰기 버그 수리 완료!] 높이를 빼지 않고 현재 Y좌표를 그대로 물려줍니다.
+                                 int shiftOffset = (focusedChild != null) ? focusedChild.getTop() : 0;
+@@ -11610,7 +11638,13 @@ public class MainActivity extends Activity {
+ 
+                             // 💡 다음 항목이 '완전히' 보일 때만 포커스 이동! (맨 밑에 반쯤 걸친 항목은 강제 스크롤시킴)
+                             if (vis >= 0 && vis < listVirtualSongs.getChildCount() - 1) {
+-                                listVirtualSongs.getChildAt(vis).requestFocus();
++                                // 🚀 [포커스 되돌아가기 버그 완전 해결] requestFocus()만 호출하면 ListView 내부의
++                                // 선택 위치(mSelectedPosition)가 갱신되지 않아, 다음 레이아웃 패스(마퀴 텍스트
++                                // 스크롤 등으로 수시로 발생)때 ListView가 포커스를 예전 위치로 되돌려버립니다.
++                                // setSelectionFromTop으로 내부 상태부터 동기화한 뒤 포커스를 줍니다.
++                                View target = listVirtualSongs.getChildAt(vis);
++                                listVirtualSongs.setSelectionFromTop(nextPos, target.getTop());
++                                target.requestFocus();
+                             } else {
+                                 // 🚀 [스크롤 널뛰기 버그 수리 완료!] 다음 곡이 현재 곡의 정확한 위치(Y좌표)를 뺏어오도록 고정!
+                                 int shiftOffset = (focusedChild != null) ? focusedChild.getTop() : 0;
+diff --git a/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java b/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
+index fa98531..109f742 100644
+--- a/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
++++ b/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
+@@ -38,6 +38,10 @@ public class AudioPlayerManager {
+     public Y1CrossfeedAudioProcessor crossfeedProcessor = new Y1CrossfeedAudioProcessor();
+ 
+     private float currentSpeed = 1.0f;
++    // 🚀 스트리밍 중엔 currentPlaylist에 가짜(Dummy) File 하나만 들어있으므로,
++    // prepareMusicTrack()의 "파일 존재 확인" 로직을 절대 태우면 안 됩니다!
++    private boolean isStreamingPodcast = false;
++    private boolean lenientHttpsInstalled = false;
+     
+     // 🚀 [취침 예약 타이머]
+     private Handler sleepTimerHandler = new Handler(android.os.Looper.getMainLooper());
+@@ -204,12 +208,49 @@ public class AudioPlayerManager {
+ 
+                 @Override
+                 public void onPlayerError(com.google.android.exoplayer2.ExoPlaybackException error) {
++                    if (isStreamingPodcast) {
++                        isStreamingPodcast = false;
++                        final String reason = describeStreamError(error);
++                        MainActivity m = MainActivity.instance;
++                        if (m != null) {
++                            m.runOnUiThread(() -> {
++                                Toast.makeText(m, "⚠️ Stream failed: " + reason, Toast.LENGTH_LONG).show();
++                                m.isPausedByHand = true;
++                                m.updatePlayerUI();
++                            });
++                        }
++                        return;
++                    }
+                     handleTrackError("Cannot play this file.");
+                 }
+             });
+         }
+     }
+ 
++    // 🚀 ExoPlaybackException을 뭉뚱그리지 않고 실제 원인을 뽑아냅니다 (SSL/리다이렉트/포맷 등 진짜 사유 확인용)
++    private String describeStreamError(com.google.android.exoplayer2.ExoPlaybackException error) {
++        try {
++            Throwable cause;
++            switch (error.type) {
++                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_SOURCE:
++                    cause = error.getSourceException();
++                    break;
++                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_RENDERER:
++                    cause = error.getRendererException();
++                    break;
++                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_UNEXPECTED:
++                    cause = error.getUnexpectedException();
++                    break;
++                default:
++                    cause = error;
++            }
++            String msg = cause != null ? cause.getMessage() : null;
++            return (msg == null || msg.isEmpty()) ? cause.getClass().getSimpleName() : msg;
++        } catch (Exception e) {
++            return "Unknown error";
++        }
++    }
++
+     public void setPlaybackSpeed(float speed) {
+         this.currentSpeed = speed;
+         if (exoPlayer != null) {
+@@ -298,6 +339,7 @@ public class AudioPlayerManager {
+         final MainActivity main = MainActivity.instance;
+         if (main == null) return;
+ 
++        isStreamingPodcast = false; // 🚀 일반 재생으로 돌아왔으니 스트리밍 플래그 해제!
+         initPlayer(main);
+ 
+         // 1. 외부에서 받은 리스트를 안전하게 복사
+@@ -335,11 +377,37 @@ public class AudioPlayerManager {
+         prepareMusicTrack(main.currentIndex);
+         main.updatePlayerUI(); // 🚀 타이머 즉시 시작!
+     }
++    // 🚀 이 기기는 RSS 조회/다운로드 때도 인증서 검증을 전부 무시해야 붙는 서버가 있어서(MainActivity의
++    // trust-all OkHttpClient 참고), ExoPlayer가 쓰는 표준 HttpsURLConnection에도 동일하게 적용해줘야
++    // 스트리밍 시 SSL 핸드셰이크로 조용히 죽는 걸 막을 수 있습니다. 팟캐스트 스트리밍 시작 시 1회만 설치합니다.
++    private void ensureLenientHttpsDefaults() {
++        if (lenientHttpsInstalled) return;
++        try {
++            javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
++                    new javax.net.ssl.X509TrustManager() {
++                        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
++                            return new java.security.cert.X509Certificate[]{};
++                        }
++                        public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
++                        public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
++                    }
++            };
++            javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
++            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
++            javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
++            javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
++            lenientHttpsInstalled = true;
++        } catch (Exception e) {}
++    }
++
+     public void playPodcastStream(String url, String title, String imageUrl, String channelName, int offsetMs) {
+         final MainActivity main = MainActivity.instance;
+         if (main == null) return;
+ 
+         try {
++            isStreamingPodcast = true;
++            ensureLenientHttpsDefaults(); // 🚀 다운로드/RSS와 동일하게 인증서 검증을 완화해야 이 기기에서 HTTPS 스트림이 열립니다!
++
+             // 🚀 [레거시 찌꺼기 완벽 삭제!] 오직 무적의 ExoPlayer만 사용합니다!
+             if (exoPlayer == null) initPlayer(main.getApplicationContext());
+             else { exoPlayer.stop(); exoPlayer.clearMediaItems(); }
+@@ -352,7 +420,12 @@ public class AudioPlayerManager {
+             main.currentIndex = 0;
+ 
+             com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(android.net.Uri.parse(url));
+-            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"));
++            // 🚀 [핵심 수정] 팟캐스트 트래커/CDN 리다이렉트(http<->https 302 등)를 허용하고 타임아웃을 넉넉히 줍니다.
++            com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory httpDataSourceFactory =
++                    new com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory(
++                            com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"),
++                            15000, 15000, true);
++            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, httpDataSourceFactory);
+             com.google.android.exoplayer2.extractor.DefaultExtractorsFactory extractorsFactory = new com.google.android.exoplayer2.extractor.DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
+             com.google.android.exoplayer2.source.MediaSource mediaSource = new com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
+ 
+@@ -441,7 +514,11 @@ public class AudioPlayerManager {
+ 
+             exoPlayer.setPlayWhenReady(true);
+ 
+-        } catch (Exception e) {}
++        } catch (Exception e) {
++            isStreamingPodcast = false;
++            final String msg = e.getMessage();
++            main.runOnUiThread(() -> Toast.makeText(main, "⚠️ Stream failed: " + (msg == null ? "Unknown error" : msg), Toast.LENGTH_LONG).show());
++        }
+     }
+     public void playTrackListWithOffset(List<File> list, int index, int offsetMs) {
+         playTrackList(list, index);
+@@ -544,6 +621,8 @@ public class AudioPlayerManager {
+     public void prepareMusicTrack(int index) {
+         final MainActivity main = MainActivity.instance;
+         if (main == null || main.currentPlaylist.isEmpty()) return;
++        // 🚀 스트리밍 중엔 currentPlaylist에 실존하지 않는 더미 File만 들어있으므로 여기서 손대면 안 됩니다!
++        if (isStreamingPodcast) return;
+ 
+         final File track = main.currentPlaylist.get(index);
+         main.lastAlbumArtBytes = null;

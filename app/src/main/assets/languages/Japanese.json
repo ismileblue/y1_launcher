@@ -350,5 +350,17 @@
     "Add to Queue": "キューに追加",
     "Added to Play Next": "次に再生に追加しました",
     "Added to Queue": "キューに追加しました",
-    "No playable audio files found.": "再生可能な音声ファイルが見つかりません"
+    "No playable audio files found.": "再生可能な音声ファイルが見つかりません",
+    "Network Error: ": "通信エラー: ",
+    "Stream failed: ": "ストリーミング再生失敗: ",
+    "Unknown error": "不明なエラー",
+    "Play All Videos": "すべての動画を再生",
+    "Last.fm Login Guide": "Last.fm ログイン案内",
+    "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.": "ワイヤレスPCアップロード（Webサーバー）を起動し、PCまたはスマートフォンのブラウザからLast.fmにログインしてください。",
+    "Start Web Server": "Webサーバー起動",
+    "Last.fm Logout": "Last.fm ログアウト",
+    "Are you sure you want to log out from Last.fm?": "Last.fmアカウントからログアウトしますか？",
+    "Logout": "ログアウト",
+    "Logged out": "ログアウトしました",
+    "Not logged in": "未ログイン"
 }

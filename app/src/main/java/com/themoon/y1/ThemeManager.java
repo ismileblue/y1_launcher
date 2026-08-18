@@ -135,7 +135,7 @@ public class ThemeManager {
         availableThemes.clear();
 
         ThemeData defaultTheme = new ThemeData("default", "Dark (Default)", "", android.graphics.Typeface.DEFAULT,
-                0xFFFFFFFF, 0xFF888888, 0x00000000, 0x88000000, 0x15FFFFFF, 0xDDFFFFFF, 0xFF000000, 15);
+                0xFFFFFFFF, 0xFFCCCCCC, 0x00000000, 0x88000000, 0x15FFFFFF, 0xDDFFFFFF, 0xFF000000, 15);
         // 🚀 [버그 수리 완료] 모든 요소의 인자 순서와 개수(30개)를 생성자 포맷과 100% 일치하도록 칼같이 재정렬했습니다!
 
         // 1. 기본 가두리 프레임 및 스크롤 상자 배치
@@ -234,7 +234,7 @@ public class ThemeManager {
                             int parsedOverlayBg = safeParseColor(json.optString("bgOverlay"), 0x88000000);
                             int parsedStatusBarBg = safeParseColor(json.optString("statusBarBg"), parsedOverlayBg);
                             int parsedTextPrimary = safeParseColor(json.optString("textPrimary"), 0xFFFFFFFF);
-                            int parsedTextSecondary = safeParseColor(json.optString("textSecondary"), 0xFF888888);
+                            int parsedTextSecondary = safeParseColor(json.optString("textSecondary"), 0xFFCCCCCC);
                             int parsedBtnNormal = safeParseColor(json.optString("btnNormal"), 0x15FFFFFF);
                             int parsedBtnFocused = safeParseColor(json.optString("btnFocused"), 0xDDFFFFFF);
                             int parsedBtnFocusedText = safeParseColor(json.optString("btnFocusedText"), 0xFF000000);

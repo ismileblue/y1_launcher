@@ -38,6 +38,11 @@ public class AudioPlayerManager {
     public Y1CrossfeedAudioProcessor crossfeedProcessor = new Y1CrossfeedAudioProcessor();
 
     private float currentSpeed = 1.0f;
+    // 🚀 스트리밍 중엔 currentPlaylist에 가짜(Dummy) File 하나만 들어있으므로,
+    // prepareMusicTrack()의 "파일 존재 확인" 로직을 절대 태우면 안 됩니다!
+    private boolean isStreamingPodcast = false;
+    private boolean lenientHttpsInstalled = false;
+    public boolean isCurrentTrackScrobbled = false;
     
     // 🚀 [취침 예약 타이머]
     private Handler sleepTimerHandler = new Handler(android.os.Looper.getMainLooper());
@@ -82,20 +87,9 @@ public class AudioPlayerManager {
 
                     java.util.List<com.google.android.exoplayer2.audio.AudioProcessor> procList = new java.util.ArrayList<>();
 
-                    // 🚀 2. [궁극의 초고속 C++ 네이티브 리샘플러] 24비트 변환 + 48kHz 다운샘플링 
-                    // 화면이 꺼져 CPU가 200MHz로 바닥을 쳐도, Java가 아닌 C++ 네이티브(JNI)에서
-                    // 다이렉트 메모리를 조작하므로 0.001초만에 24비트 96kHz -> 16비트 48kHz 변환을 완료합니다.
+                    // 🚀 [신규 장착] MTK 기기에서 96kHz 출력 시 AudioTrack 튕김 현상을 방어하기 위한 소프트웨어 다운샘플러
+                    // 불안정한 C++ 네이티브 엔진을 걷어내고, 100% 순수 Java로 재작성된 안전한 다운샘플러를 장착합니다!
                     com.google.android.exoplayer2.audio.AudioProcessor immortalSonic = new NativeResampleAudioProcessor();
-                    // =======================================================
-// 🚀 3. [배관 조립] 파이프라인 순서 전면 개조!
-// =======================================================
-
-// 💥 [에러 해결 및 최후의 병목 제거] 
-// ExoPlayer(구버전)는 24비트 음원을 16비트 오디오트랙에 바로 넣지 못하고 에러(읽을 수 없음)를 냅니다.
-// 그래서 immortalSonic을 부활시켜 '24비트 -> 16비트 변환기'로만 사용합니다!
-// 단, 예전처럼 96kHz -> 44.1kHz 다운샘플링은 하지 않습니다! (outRate = inRate)
-// 96kHz 16비트로 변환된 데이터를 그대로 넘기면, 안드로이드 네이티브 OS(AudioFlinger)가 
-// 하드웨어 단에서 초고속으로 리샘플링하므로 CPU 부하가 극적으로 감소합니다!
                     procList.add(immortalSonic);
 
 // 🌿 16비트 일반 음원에 대해서만 EQ 연산을 수행합니다. (고해상도 24비트는 쾌적한 재생을 위해 자동 프리패스)
@@ -136,12 +130,51 @@ public class AudioPlayerManager {
                             return safeInfos.isEmpty() ? infos : safeInfos;
                         }
                     };
-                    // 🚀 최종 조립 완료 및 부모에게 전달!
-                    super.buildAudioRenderers(context, extensionRendererMode, customSelector, enableDecoderFallback, customSink, eventHandler, eventListener, out);
+                    // 🚀 최종 조립: 기본 디코더(MediaCodec)는 super를 통해 생성 (확장 디코더 자동 생성은 차단)
+                    super.buildAudioRenderers(context, com.google.android.exoplayer2.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF, customSelector, enableDecoderFallback, customSink, eventHandler, eventListener, out);
+
+                    // 🚀 [치명적 버그 수정] ExoPlayer 2.13.3의 DefaultRenderersFactory는 확장 디코더(FLAC, FFmpeg) 생성 시 
+                    // 우리가 만든 customSink를 무시하고 텅 빈 AudioProcessor 배열로 새 AudioSink를 만들어버리는 치명적 결함이 있습니다!
+                    // 이 때문에 고음질 FLAC 파일 재생 시 다운샘플러가 무시되어 96kHz 출력 제한(getMinBufferSize 에러)으로 앱이 튕깁니다.
+                    // 이를 해결하기 위해 리플렉션으로 확장 디코더를 직접 생성하고 customSink를 강제로 주입하여 최우선 순위(0번)에 배치합니다!
+                    
+                    // 1. FFmpeg 확장 디코더 수동 장착
+                    try {
+                        Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.ffmpeg.FfmpegAudioRenderer");
+                        try {
+                            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(android.os.Handler.class, com.google.android.exoplayer2.audio.AudioRendererEventListener.class, com.google.android.exoplayer2.audio.AudioSink.class);
+                            out.add(0, (com.google.android.exoplayer2.Renderer) constructor.newInstance(eventHandler, eventListener, customSink));
+                        } catch (Exception e) {
+                            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(android.os.Handler.class, com.google.android.exoplayer2.audio.AudioRendererEventListener.class, com.google.android.exoplayer2.audio.AudioProcessor[].class);
+                            out.add(0, (com.google.android.exoplayer2.Renderer) constructor.newInstance(eventHandler, eventListener, (Object) processors));
+                        }
+                    } catch (Exception e) {}
+
+                    // 2. FLAC 확장 디코더 수동 장착
+                    try {
+                        Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.flac.LibflacAudioRenderer");
+                        try {
+                            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(android.os.Handler.class, com.google.android.exoplayer2.audio.AudioRendererEventListener.class, com.google.android.exoplayer2.audio.AudioSink.class);
+                            out.add(0, (com.google.android.exoplayer2.Renderer) constructor.newInstance(eventHandler, eventListener, customSink));
+                        } catch (Exception e) {
+                            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(android.os.Handler.class, com.google.android.exoplayer2.audio.AudioRendererEventListener.class, com.google.android.exoplayer2.audio.AudioProcessor[].class);
+                            out.add(0, (com.google.android.exoplayer2.Renderer) constructor.newInstance(eventHandler, eventListener, (Object) processors));
+                        }
+                    } catch (Exception e) {}
+
+                    // 3. Opus 확장 디코더 수동 장착 (Opus 파일 재생 보장)
+                    try {
+                        Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.opus.LibopusAudioRenderer");
+                        try {
+                            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(android.os.Handler.class, com.google.android.exoplayer2.audio.AudioRendererEventListener.class, com.google.android.exoplayer2.audio.AudioSink.class);
+                            out.add(0, (com.google.android.exoplayer2.Renderer) constructor.newInstance(eventHandler, eventListener, customSink));
+                        } catch (Exception e) {
+                            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(android.os.Handler.class, com.google.android.exoplayer2.audio.AudioRendererEventListener.class, com.google.android.exoplayer2.audio.AudioProcessor[].class);
+                            out.add(0, (com.google.android.exoplayer2.Renderer) constructor.newInstance(eventHandler, eventListener, (Object) processors));
+                        }
+                    } catch (Exception e) {}
                 }
             };
-
-            renderersFactory.setExtensionRendererMode(com.google.android.exoplayer2.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
 
             // 💥 [최종 수리] 물탱크(버퍼) 크기 원상 복구!
             // 기존에는 Java 배열 메모리 폭발(GC)을 막으려고 버퍼를 2.5초로 극한까지 줄였었습니다.
@@ -204,17 +237,117 @@ public class AudioPlayerManager {
 
                 @Override
                 public void onPlayerError(com.google.android.exoplayer2.ExoPlaybackException error) {
-                    handleTrackError("Cannot play this file.");
+                    final String reason = describeStreamError(error);
+                    writeErrorLog("ExoPlayer onPlayerError: " + reason, error);
+                    if (isStreamingPodcast) {
+                        isStreamingPodcast = false;
+                        MainActivity m = MainActivity.instance;
+                        if (m != null) {
+                            m.runOnUiThread(() -> {
+                                Toast.makeText(m, "⚠️ " + m.t("Stream failed: ") + reason, Toast.LENGTH_LONG).show();
+                                m.isPausedByHand = true;
+                                m.updatePlayerUI();
+                            });
+                        }
+                        return;
+                    }
+                    handleTrackError(reason);
                 }
             });
+        }
+    }
+
+    public static String sanitizeTagString(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return raw;
+        try {
+            boolean hasMojibake = false;
+            for (int i = 0; i < raw.length(); i++) {
+                char c = raw.charAt(i);
+                if (c >= 0xC0 && c <= 0xFF) {
+                    hasMojibake = true;
+                    break;
+                }
+            }
+            if (hasMojibake) {
+                byte[] bytes = raw.getBytes("ISO-8859-1");
+                String fixed = new String(bytes, "EUC-KR");
+                for (int i = 0; i < fixed.length(); i++) {
+                    char c = fixed.charAt(i);
+                    if (c >= 0xAC00 && c <= 0xD7A3) {
+                        return fixed;
+                    }
+                }
+            }
+        } catch (Exception e) {}
+        return raw;
+    }
+
+    public static void writeErrorLog(String message, Throwable t) {
+        try {
+            android.util.Log.e("Y1_AudioError", message, t);
+            java.io.File logFile = new java.io.File("/storage/sdcard0/y1_playback_error.txt");
+            java.io.FileWriter fw = new java.io.FileWriter(logFile, true);
+            java.io.PrintWriter pw = new java.io.PrintWriter(fw);
+            String time = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(new java.util.Date());
+            pw.println("[" + time + "] " + message);
+            if (t != null) {
+                t.printStackTrace(pw);
+            }
+            pw.println("----------------------------------------");
+            pw.flush();
+            pw.close();
+            fw.close();
+        } catch (Exception e) {}
+    }
+
+    // 🚀 ExoPlaybackException을 뭉뚱그리지 않고 실제 원인을 뽑아냅니다 (SSL/리다이렉트/포맷 등 진짜 사유 확인용)
+    private String describeStreamError(com.google.android.exoplayer2.ExoPlaybackException error) {
+        try {
+            Throwable cause;
+            switch (error.type) {
+                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_SOURCE:
+                    cause = error.getSourceException();
+                    break;
+                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_RENDERER:
+                    cause = error.getRendererException();
+                    break;
+                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_UNEXPECTED:
+                    cause = error.getUnexpectedException();
+                    break;
+                default:
+                    cause = error;
+            }
+            String msg = cause != null ? cause.getMessage() : null;
+            return (msg == null || msg.isEmpty()) ? cause.getClass().getSimpleName() : msg;
+        } catch (Exception e) {
+            return "Unknown error";
         }
     }
 
     public void setPlaybackSpeed(float speed) {
         this.currentSpeed = speed;
         if (exoPlayer != null) {
-            exoPlayer.setPlaybackParameters(new PlaybackParameters(speed, 1.0f));
+            long currentPos = exoPlayer.getCurrentPosition();
+            boolean isPlaying = exoPlayer.getPlayWhenReady();
+
+            // 🚀 [1.0배속 복귀 시 무음/멈춤 버그 완전 해결]
+            // ExoPlayer DefaultAudioSink는 SonicAudioProcessor가 1.0f 일 때 비활성화(inactive)되면서
+            // 오디오 트랙 프로세서 파이프라인 배열이 변형되어 소리가 나오지 않는 버그가 있습니다.
+            // 1.0f일 때 1.0001f를 전달하면 Sonic 파이프라인이 계속 활성 상태를 유지하여
+            // 1.2배속 -> 1.5배속 -> 1.0배속 복귀 시에도 소리가 끊김 없이 100% 정상 출력됩니다!
+            float targetSpeed = (Math.abs(speed - 1.0f) < 0.001f) ? 1.0001f : speed;
+
+            exoPlayer.setPlaybackParameters(new PlaybackParameters(targetSpeed, 1.0f));
+
+            // 🚀 [재생 중 배속 변경 멈춤 버그 완전 해결]
+            if (isPlaying && currentPos > 0) {
+                exoPlayer.seekTo(currentPos);
+            }
         }
+        try {
+            com.themoon.y1.MainActivity main = com.themoon.y1.MainActivity.instance;
+            if (main != null) main.updateStatusSpeedUI();
+        } catch (Exception e) {}
     }
 
     public void setShuffleMode(boolean isShuffle) {
@@ -284,10 +417,14 @@ public class AudioPlayerManager {
     }
 
     private void handleTrackError(String errorMsg) {
+        writeErrorLog("Track Error: " + errorMsg, null);
         MainActivity main = MainActivity.instance;
         if (main == null) return;
         main.runOnUiThread(() -> {
-            Toast.makeText(main, "⚠️ " + errorMsg + " Skipping...", Toast.LENGTH_SHORT).show();
+            try {
+                Toast.makeText(main, "⚠️ 재생 에러: " + errorMsg, Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+            }
             nextTrack();
         });
     }
@@ -298,6 +435,7 @@ public class AudioPlayerManager {
         final MainActivity main = MainActivity.instance;
         if (main == null) return;
 
+        isStreamingPodcast = false; // 🚀 일반 재생으로 돌아왔으니 스트리밍 플래그 해제!
         initPlayer(main);
 
         // 1. 외부에서 받은 리스트를 안전하게 복사
@@ -335,11 +473,38 @@ public class AudioPlayerManager {
         prepareMusicTrack(main.currentIndex);
         main.updatePlayerUI(); // 🚀 타이머 즉시 시작!
     }
+
+    // 🚀 이 기기는 RSS 조회/다운로드 때도 인증서 검증을 전부 무시해야 붙는 서버가 있어서(MainActivity의
+    // trust-all OkHttpClient 참고), ExoPlayer가 쓰는 표준 HttpsURLConnection에도 동일하게 적용해줘야
+    // 스트리밍 시 SSL 핸드셰이크로 조용히 죽는 걸 막을 수 있습니다. 팟캐스트 스트리밍 시작 시 1회만 설치합니다.
+    private void ensureLenientHttpsDefaults() {
+        if (lenientHttpsInstalled) return;
+        try {
+            javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                    new javax.net.ssl.X509TrustManager() {
+                        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+                            return new java.security.cert.X509Certificate[]{};
+                        }
+                        public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                        public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                    }
+            };
+            javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+            javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+            lenientHttpsInstalled = true;
+        } catch (Exception e) {}
+    }
+
     public void playPodcastStream(String url, String title, String imageUrl, String channelName, int offsetMs) {
         final MainActivity main = MainActivity.instance;
         if (main == null) return;
 
         try {
+            isStreamingPodcast = true;
+            ensureLenientHttpsDefaults(); // 🚀 다운로드/RSS와 동일하게 인증서 검증을 완화해야 이 기기에서 HTTPS 스트림이 열립니다!
+
             // 🚀 [레거시 찌꺼기 완벽 삭제!] 오직 무적의 ExoPlayer만 사용합니다!
             if (exoPlayer == null) initPlayer(main.getApplicationContext());
             else { exoPlayer.stop(); exoPlayer.clearMediaItems(); }
@@ -352,7 +517,12 @@ public class AudioPlayerManager {
             main.currentIndex = 0;
 
             com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(android.net.Uri.parse(url));
-            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"));
+            // 🚀 [핵심 수정] 팟캐스트 트래커/CDN 리다이렉트(http<->https 302 등)를 허용하고 타임아웃을 넉넉히 줍니다.
+            com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory httpDataSourceFactory =
+                    new com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory(
+                            com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"),
+                            15000, 15000, true);
+            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, httpDataSourceFactory);
             com.google.android.exoplayer2.extractor.DefaultExtractorsFactory extractorsFactory = new com.google.android.exoplayer2.extractor.DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
             com.google.android.exoplayer2.source.MediaSource mediaSource = new com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
 
@@ -441,7 +611,11 @@ public class AudioPlayerManager {
 
             exoPlayer.setPlayWhenReady(true);
 
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            isStreamingPodcast = false;
+            final String msg = e.getMessage();
+            main.runOnUiThread(() -> Toast.makeText(main, "⚠️ " + main.t("Stream failed: ") + (msg == null ? main.t("Unknown error") : msg), Toast.LENGTH_LONG).show());
+        }
     }
     public void playTrackListWithOffset(List<File> list, int index, int offsetMs) {
         playTrackList(list, index);
@@ -544,6 +718,8 @@ public class AudioPlayerManager {
     public void prepareMusicTrack(int index) {
         final MainActivity main = MainActivity.instance;
         if (main == null || main.currentPlaylist.isEmpty()) return;
+        // 🚀 스트리밍 중엔 currentPlaylist에 실존하지 않는 더미 File만 들어있으므로 여기서 손대면 안 됩니다!
+        if (isStreamingPodcast) return;
 
         final File track = main.currentPlaylist.get(index);
         main.lastAlbumArtBytes = null;
@@ -622,9 +798,11 @@ public class AudioPlayerManager {
 
             } else {
                 // 🚀 MP3, WAV 등 버틸 수 있는 파일만 순정 부품 사용
+                android.media.MediaMetadataRetriever mmr = null;
+                java.io.FileInputStream fisMmr = null;
                 try {
-                    android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
-                    java.io.FileInputStream fisMmr = new java.io.FileInputStream(track);
+                    mmr = new android.media.MediaMetadataRetriever();
+                    fisMmr = new java.io.FileInputStream(track);
                     mmr.setDataSource(fisMmr.getFD());
                     t = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE);
                     a = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST);
@@ -633,9 +811,25 @@ public class AudioPlayerManager {
                     al = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM);
 
                     main.lastAlbumArtBytes = mmr.getEmbeddedPicture();
-                    fisMmr.close();
-                    mmr.release();
-                } catch (Throwable e) {}
+                    if (main.lastAlbumArtBytes != null && main.lastAlbumArtBytes.length > 0) {
+                        try {
+                            android.graphics.BitmapFactory.Options checkOpts = new android.graphics.BitmapFactory.Options();
+                            checkOpts.inJustDecodeBounds = true;
+                            android.graphics.BitmapFactory.decodeByteArray(main.lastAlbumArtBytes, 0, main.lastAlbumArtBytes.length, checkOpts);
+                            if (checkOpts.outWidth <= 0 || checkOpts.outHeight <= 0) {
+                                main.lastAlbumArtBytes = null;
+                                writeErrorLog("Corrupt or unsupported JPEG (YUV 4:4:4) detected in " + track.getName() + ". Album art safely cleared.", null);
+                            }
+                        } catch (Throwable imgErr) {
+                            main.lastAlbumArtBytes = null;
+                        }
+                    }
+                } catch (Throwable e) {
+                    writeErrorLog("MediaMetadataRetriever failed for " + track.getName(), e);
+                } finally {
+                    try { if (fisMmr != null) fisMmr.close(); } catch (Throwable ignored) {}
+                    try { if (mmr != null) mmr.release(); } catch (Throwable ignored) {}
+                }
             }
 
             // ==========================================
@@ -672,6 +866,10 @@ public class AudioPlayerManager {
                     }
                 } catch (Exception e) {}
             }
+
+            t = sanitizeTagString(t);
+            a = sanitizeTagString(a);
+            al = sanitizeTagString(al);
 
             if (t != null && !t.trim().isEmpty()) main.tvPlayerTitle.setText(t);
             else main.tvPlayerTitle.setText(safeFileName);
@@ -820,11 +1018,20 @@ public class AudioPlayerManager {
 
             com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(Uri.fromFile(track));
             DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(main, Util.getUserAgent(main, "Y1_Launcher"));
-            DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
+            DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                    .setConstantBitrateSeekingEnabled(true)
+                    .setMp3ExtractorFlags(com.google.android.exoplayer2.extractor.mp3.Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING | com.google.android.exoplayer2.extractor.mp3.Mp3Extractor.FLAG_DISABLE_ID3_METADATA);
             MediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
 
             exoPlayer.setMediaSource(mediaSource);
             exoPlayer.prepare(); // 💡 장전 완료!
+            isCurrentTrackScrobbled = false;
+            
+            if (LastFmManager.getInstance(main).isEnabled()) {
+                String a = main.tvPlayerArtist != null ? main.tvPlayerArtist.getText().toString() : track.getName();
+                String tr = main.tvPlayerTitle != null ? main.tvPlayerTitle.getText().toString() : track.getName();
+                LastFmManager.getInstance(main).updateNowPlaying(tr, a);
+            }
 
             boolean isShuffle = main.prefs.getBoolean("shuffle", false);
             exoPlayer.setShuffleModeEnabled(isShuffle);
@@ -850,14 +1057,13 @@ public class AudioPlayerManager {
 
         } catch (Throwable e) {
             main.consecutiveErrorCount++;
-            String failReason = "Unknown Error";
-            if (e instanceof OutOfMemoryError) failReason = "Album Art is too huge!";
-            else if (e instanceof java.io.FileNotFoundException) failReason = "File not found";
-            else if (e instanceof java.io.IOException) failReason = "Broken file";
+            String failReason = e.getClass().getSimpleName() + (e.getMessage() != null ? ": " + e.getMessage() : "");
+            if (e instanceof OutOfMemoryError) failReason = "OutOfMemory: 앨범아트 용량이 너무 큽니다!";
+            else if (e instanceof java.io.FileNotFoundException) failReason = "파일을 찾을 수 없습니다";
 
             main.tvPlayerTitle.setText("Load Failed ❌");
             main.tvPlayerArtist.setText(failReason);
-            Toast.makeText(main, "🚨 " + failReason, Toast.LENGTH_SHORT).show();
+            Toast.makeText(main, "🚨 재생 실패: " + failReason, Toast.LENGTH_LONG).show();
 
             if (main.consecutiveErrorCount >= main.currentPlaylist.size()) {
                 main.isPausedByHand = true;
@@ -954,28 +1160,47 @@ public class AudioPlayerManager {
     // 🚀 [자체 제작 4.0] Ogg 껍데기 분쇄형 Opus 정밀 스캐너 (6종 메타데이터 싹쓸이)
     // =======================================================
     public Object[] extractOpusMetadata(File file) {
-        // [0]제목, [1]가수, [2]앨범, [3]연도, [4]장르, [5]앨범아트(byte[])
-        Object[] tags = new Object[]{null, null, null, null, null, null};
+        // [0]제목, [1]가수, [2]앨범, [3]연도, [4]장르, [5]앨범아트(byte[]), [6]트랙번호, [7]가사
+        Object[] tags = new Object[]{null, null, null, null, null, null, null, null};
         try {
             java.io.FileInputStream fis = new java.io.FileInputStream(file);
             java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
             byte[] header = new byte[27];
             int totalRead = 0;
 
-            // 🚀 1. 최대 1.5MB까지만 읽어서 Ogg 캡슐 껍데기를 싹 벗겨내고 순수 알맹이만 이어 붙입니다!
-            while (totalRead < 1500000 && fis.read(header) == 27) {
+            // 🚀 1. 최대 2MB까지만 읽어서 Ogg 캡슐 껍데기를 싹 벗겨내고 순수 알맹이만 이어 붙입니다!
+            while (totalRead < 2000000) {
+                int bytesRead = 0;
+                while (bytesRead < 27) {
+                    int r = fis.read(header, bytesRead, 27 - bytesRead);
+                    if (r <= 0) break;
+                    bytesRead += r;
+                }
+                if (bytesRead < 27) break;
+
                 if (header[0] != 'O' || header[1] != 'g' || header[2] != 'g' || header[3] != 'S') break;
 
                 int pageSegments = header[26] & 0xFF;
                 byte[] segmentTable = new byte[pageSegments];
-                fis.read(segmentTable);
+                int segRead = 0;
+                while (segRead < pageSegments) {
+                    int r = fis.read(segmentTable, segRead, pageSegments - segRead);
+                    if (r <= 0) break;
+                    segRead += r;
+                }
+                if (segRead < pageSegments) break;
 
                 int pageSize = 0;
                 for (int i = 0; i < pageSegments; i++) pageSize += (segmentTable[i] & 0xFF);
 
                 byte[] pageData = new byte[pageSize];
-                int read = fis.read(pageData);
-                if (read > 0) bos.write(pageData, 0, read);
+                int dataRead = 0;
+                while (dataRead < pageSize) {
+                    int r = fis.read(pageData, dataRead, pageSize - dataRead);
+                    if (r <= 0) break;
+                    dataRead += r;
+                }
+                if (dataRead > 0) bos.write(pageData, 0, dataRead);
 
                 totalRead += (27 + pageSegments + pageSize);
             }
@@ -985,7 +1210,7 @@ public class AudioPlayerManager {
             byte[] buffer = bos.toByteArray();
             byte[] magic = "OpusTags".getBytes("UTF-8");
             int p = -1;
-            for (int i = 0; i < buffer.length - magic.length; i++) {
+            for (int i = 0; i <= buffer.length - magic.length; i++) {
                 boolean match = true;
                 for (int j = 0; j < magic.length; j++) {
                     if (buffer[i + j] != magic[j]) { match = false; break; }
@@ -993,53 +1218,59 @@ public class AudioPlayerManager {
                 if (match) { p = i; break; }
             }
 
-            // 🚀 3. 태그 6종류 정밀 폭격 추출 가동!
+            // 🚀 3. 태그 정밀 추출 가동!
             if (p != -1) {
                 p += 8;
-                int vendorLen = (buffer[p] & 0xFF) | ((buffer[p+1] & 0xFF) << 8) | ((buffer[p+2] & 0xFF) << 16) | ((buffer[p+3] & 0xFF) << 24);
-                p += 4 + vendorLen;
+                if (p + 4 <= buffer.length) {
+                    int vendorLen = (buffer[p] & 0xFF) | ((buffer[p+1] & 0xFF) << 8) | ((buffer[p+2] & 0xFF) << 16) | ((buffer[p+3] & 0xFF) << 24);
+                    p += 4 + vendorLen;
 
-                int commentsCount = (buffer[p] & 0xFF) | ((buffer[p+1] & 0xFF) << 8) | ((buffer[p+2] & 0xFF) << 16) | ((buffer[p+3] & 0xFF) << 24);
-                p += 4;
+                    if (p + 4 <= buffer.length) {
+                        int commentsCount = (buffer[p] & 0xFF) | ((buffer[p+1] & 0xFF) << 8) | ((buffer[p+2] & 0xFF) << 16) | ((buffer[p+3] & 0xFF) << 24);
+                        p += 4;
 
-                for (int i = 0; i < commentsCount && p < buffer.length - 4; i++) {
-                    int commentLen = (buffer[p] & 0xFF) | ((buffer[p+1] & 0xFF) << 8) | ((buffer[p+2] & 0xFF) << 16) | ((buffer[p+3] & 0xFF) << 24);
-                    p += 4;
-                    if (commentLen <= 0 || p + commentLen > buffer.length) break;
+                        for (int i = 0; i < commentsCount && p < buffer.length - 4; i++) {
+                            int commentLen = (buffer[p] & 0xFF) | ((buffer[p+1] & 0xFF) << 8) | ((buffer[p+2] & 0xFF) << 16) | ((buffer[p+3] & 0xFF) << 24);
+                            p += 4;
+                            if (commentLen <= 0 || p + commentLen > buffer.length) break;
 
-                    String comment = new String(buffer, p, commentLen, "UTF-8");
-                    p += commentLen;
-                    String upper = comment.toUpperCase();
+                            String comment = new String(buffer, p, commentLen, "UTF-8");
+                            p += commentLen;
+                            String upper = comment.toUpperCase();
 
-                    // 라이브러리 분류를 위한 5대 텍스트 수집!
-                    // 라이브러리 분류를 위한 5대 텍스트 수집!
-                    if (upper.startsWith("TITLE=")) tags[0] = comment.substring(6);
-                    else if (upper.startsWith("ARTIST=") || upper.startsWith("AUTHOR=")) tags[1] = comment.substring(comment.indexOf("=") + 1); // 🚀 작가(AUTHOR) 태그 완벽 지원!
-                    else if (upper.startsWith("ALBUM=")) tags[2] = comment.substring(6);
-                    else if (upper.startsWith("DATE=") || upper.startsWith("YEAR=")) tags[3] = comment.substring(comment.indexOf("=") + 1);
-                    else if (upper.startsWith("GENRE=")) tags[4] = comment.substring(6);
-                    else if (upper.startsWith("TRACKNUMBER=") || upper.startsWith("TRACKNUM=")) tags[6] = comment.substring(comment.indexOf("=") + 1);
-                    else if (upper.startsWith("METADATA_BLOCK_PICTURE=")) {
-                        try {
-                            // 🚀 공백, 줄바꿈 찌꺼기를 완벽히 지워 Base64 해독 성공률 100% 달성!
-                            String base64Data = comment.substring(23).replaceAll("\\s", "");
-                            byte[] flacPic = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
+                            int eqIdx = comment.indexOf("=");
+                            if (eqIdx > 0) {
+                                String val = comment.substring(eqIdx + 1);
+                                if (upper.startsWith("TITLE=")) tags[0] = val;
+                                else if (upper.startsWith("ARTIST=") || upper.startsWith("AUTHOR=")) tags[1] = val;
+                                else if (upper.startsWith("ALBUM=")) tags[2] = val;
+                                else if (upper.startsWith("DATE=") || upper.startsWith("YEAR=")) tags[3] = val;
+                                else if (upper.startsWith("GENRE=")) tags[4] = val;
+                                else if (upper.startsWith("TRACKNUMBER=") || upper.startsWith("TRACKNUM=")) tags[6] = val;
+                                else if (upper.startsWith("LYRICS=")) tags[7] = val;
+                                else if (upper.startsWith("METADATA_BLOCK_PICTURE=")) {
+                                    try {
+                                        String base64Data = val.replaceAll("\\s", "");
+                                        byte[] flacPic = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
 
-                            int ptr = 4;
-                            int mimeLen = ((flacPic[ptr] & 0xFF) << 24) | ((flacPic[ptr+1] & 0xFF) << 16) | ((flacPic[ptr+2] & 0xFF) << 8) | (flacPic[ptr+3] & 0xFF);
-                            ptr += 4 + mimeLen;
-                            int descLen = ((flacPic[ptr] & 0xFF) << 24) | ((flacPic[ptr+1] & 0xFF) << 16) | ((flacPic[ptr+2] & 0xFF) << 8) | (flacPic[ptr+3] & 0xFF);
-                            ptr += 4 + descLen;
-                            ptr += 16;
-                            int picDataLen = ((flacPic[ptr] & 0xFF) << 24) | ((flacPic[ptr+1] & 0xFF) << 16) | ((flacPic[ptr+2] & 0xFF) << 8) | (flacPic[ptr+3] & 0xFF);
-                            ptr += 4;
+                                        int ptr = 4;
+                                        int mimeLen = ((flacPic[ptr] & 0xFF) << 24) | ((flacPic[ptr+1] & 0xFF) << 16) | ((flacPic[ptr+2] & 0xFF) << 8) | (flacPic[ptr+3] & 0xFF);
+                                        ptr += 4 + mimeLen;
+                                        int descLen = ((flacPic[ptr] & 0xFF) << 24) | ((flacPic[ptr+1] & 0xFF) << 16) | ((flacPic[ptr+2] & 0xFF) << 8) | (flacPic[ptr+3] & 0xFF);
+                                        ptr += 4 + descLen;
+                                        ptr += 16;
+                                        int picDataLen = ((flacPic[ptr] & 0xFF) << 24) | ((flacPic[ptr+1] & 0xFF) << 16) | ((flacPic[ptr+2] & 0xFF) << 8) | (flacPic[ptr+3] & 0xFF);
+                                        ptr += 4;
 
-                            if (ptr + picDataLen <= flacPic.length) {
-                                byte[] img = new byte[picDataLen];
-                                System.arraycopy(flacPic, ptr, img, 0, picDataLen);
-                                tags[5] = img; // 🎯 앨범 아트 최종 확보!
+                                        if (ptr + picDataLen <= flacPic.length) {
+                                            byte[] img = new byte[picDataLen];
+                                            System.arraycopy(flacPic, ptr, img, 0, picDataLen);
+                                            tags[5] = img; // 🎯 앨범 아트
+                                        }
+                                    } catch (Exception e) {}
+                                }
                             }
-                        } catch (Exception e) {}
+                        }
                     }
                 }
             }
@@ -1070,41 +1301,83 @@ public class AudioPlayerManager {
                 int length = (raf.readUnsignedByte() << 16) | (raf.readUnsignedByte() << 8) | raf.readUnsignedByte();
 
                 if (blockType == 4) { // 🚀 텍스트 정보 추출 (Vorbis Comment)
-                    byte[] commentData = new byte[length];
-                    raf.readFully(commentData);
-                    try {
-                        int p = 0;
-                        int vendorLen = (commentData[p]&0xFF) | ((commentData[p+1]&0xFF)<<8) | ((commentData[p+2]&0xFF)<<16) | ((commentData[p+3]&0xFF)<<24);
-                        p += 4 + vendorLen;
-                        int listLen = (commentData[p]&0xFF) | ((commentData[p+1]&0xFF)<<8) | ((commentData[p+2]&0xFF)<<16) | ((commentData[p+3]&0xFF)<<24);
-                        p += 4;
-                        for (int i = 0; i < listLen && p < commentData.length - 4; i++) {
-                            int strLen = (commentData[p]&0xFF) | ((commentData[p+1]&0xFF)<<8) | ((commentData[p+2]&0xFF)<<16) | ((commentData[p+3]&0xFF)<<24);
+                    if (length > 0 && length < 5 * 1024 * 1024) { // 🚀 5MB 이상인 비정상 코멘트 데이터 스킵 (방어막)
+                        byte[] commentData = new byte[length];
+                        raf.readFully(commentData);
+                        try {
+                            int p = 0;
+                            int vendorLen = (commentData[p]&0xFF) | ((commentData[p+1]&0xFF)<<8) | ((commentData[p+2]&0xFF)<<16) | ((commentData[p+3]&0xFF)<<24);
+                            p += 4 + vendorLen;
+                            int listLen = (commentData[p]&0xFF) | ((commentData[p+1]&0xFF)<<8) | ((commentData[p+2]&0xFF)<<16) | ((commentData[p+3]&0xFF)<<24);
                             p += 4;
-                            String comment = new String(commentData, p, strLen, "UTF-8");
-                            p += strLen;
-                            String upper = comment.toUpperCase();
+                            for (int i = 0; i < listLen && p < commentData.length - 4; i++) {
+                                int strLen = (commentData[p]&0xFF) | ((commentData[p+1]&0xFF)<<8) | ((commentData[p+2]&0xFF)<<16) | ((commentData[p+3]&0xFF)<<24);
+                                p += 4;
+                                String comment = new String(commentData, p, strLen, "UTF-8");
+                                p += strLen;
+                                String upper = comment.toUpperCase();
 
-                            // 🚀 대망의 텍스트 수집 (가사 포함!)
-                            if (upper.startsWith("TITLE=")) tags[0] = comment.substring(6);
-                            else if (upper.startsWith("ARTIST=") || upper.startsWith("AUTHOR=")) tags[1] = comment.substring(comment.indexOf("=") + 1);
-                            else if (upper.startsWith("ALBUM=")) tags[2] = comment.substring(6);
-                            else if (upper.startsWith("DATE=") || upper.startsWith("YEAR=")) tags[3] = comment.substring(comment.indexOf("=") + 1);
-                            else if (upper.startsWith("GENRE=")) tags[4] = comment.substring(6);
-                            else if (upper.startsWith("TRACKNUMBER=") || upper.startsWith("TRACKNUM=")) tags[6] = comment.substring(comment.indexOf("=") + 1);
-                                // 🎯 [신규 장착] FLAC 내부에 LYRICS 라는 이름으로 박혀있는 가사 텍스트를 무자비하게 캐옵니다!
-                            else if (upper.startsWith("LYRICS=")) tags[7] = comment.substring(7);
-                        }
-                    } catch (Exception e) {}
+                                // 🚀 대망의 텍스트 수집 (가사 포함!)
+                                if (upper.startsWith("TITLE=")) tags[0] = comment.substring(6);
+                                else if (upper.startsWith("ARTIST=") || upper.startsWith("AUTHOR=")) tags[1] = comment.substring(comment.indexOf("=") + 1);
+                                else if (upper.startsWith("ALBUM=")) tags[2] = comment.substring(6);
+                                else if (upper.startsWith("DATE=") || upper.startsWith("YEAR=")) tags[3] = comment.substring(comment.indexOf("=") + 1);
+                                else if (upper.startsWith("GENRE=")) tags[4] = comment.substring(6);
+                                else if (upper.startsWith("TRACKNUMBER=") || upper.startsWith("TRACKNUM=")) tags[6] = comment.substring(comment.indexOf("=") + 1);
+                                    // 🎯 [신규 장착] FLAC 내부에 LYRICS 라는 이름으로 박혀있는 가사 텍스트를 무자비하게 캐옵니다!
+                                else if (upper.startsWith("LYRICS=")) tags[7] = comment.substring(7);
+                            }
+                        } catch (Exception e) {}
+                    } else if (length > 0) {
+                        raf.skipBytes(length);
+                    }
                 } else if (blockType == 6) { // 🚀 사진 추출
                     int picType = raf.readInt();
                     int mimeLen = raf.readInt(); raf.skipBytes(mimeLen);
                     int descLen = raf.readInt(); raf.skipBytes(descLen);
                     raf.skipBytes(16);
                     int picDataLen = raf.readInt();
-                    byte[] picData = new byte[picDataLen];
-                    raf.readFully(picData);
-                    tags[5] = picData; // 🎯 사진 데이터
+                    
+                    if (picDataLen > 0 && picDataLen < 20 * 1024 * 1024) { // 🚀 20MB까지만 허용 (메모리 폭발 방어막)
+                        if (picDataLen > 2 * 1024 * 1024) { // 🚀 2MB 이상일 경우: 디스크에서 직접 리사이징하여 불러옴
+                            long offset = raf.getFilePointer();
+                            try {
+                                java.io.FileInputStream fis = new java.io.FileInputStream(file);
+                                fis.skip(offset);
+                                
+                                android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                                opts.inJustDecodeBounds = true;
+                                android.graphics.BitmapFactory.decodeStream(fis, null, opts);
+                                fis.close();
+                                
+                                int scale = 1;
+                                while (opts.outWidth / scale > 500 || opts.outHeight / scale > 500) {
+                                    scale *= 2;
+                                }
+                                
+                                fis = new java.io.FileInputStream(file);
+                                fis.skip(offset);
+                                opts.inJustDecodeBounds = false;
+                                opts.inSampleSize = scale;
+                                android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(fis, null, opts);
+                                fis.close();
+                                
+                                if (bmp != null) {
+                                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                                    bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, baos);
+                                    tags[5] = baos.toByteArray();
+                                    bmp.recycle();
+                                }
+                            } catch (Exception e) {}
+                            raf.skipBytes(picDataLen);
+                        } else {
+                            byte[] picData = new byte[picDataLen];
+                            raf.readFully(picData);
+                            tags[5] = picData; // 🎯 사진 데이터
+                        }
+                    } else if (picDataLen > 0) {
+                        raf.skipBytes(picDataLen); // 20MB 이상은 무조건 스킵
+                    }
                 } else {
                     raf.skipBytes(length);
                 }

@@ -350,5 +350,17 @@
     "Add to Queue": "添加到当前播放队列",
     "Added to Play Next": "已添加至下一首播放",
     "Added to Queue": "已添加至播放队列",
-    "No playable audio files found.": "未找到可播放的音频文件"
+    "No playable audio files found.": "未找到可播放的音频文件",
+    "Network Error: ": "网络错误: ",
+    "Stream failed: ": "流媒体播放失败: ",
+    "Unknown error": "未知错误",
+    "Play All Videos": "播放全部视频",
+    "Last.fm Login Guide": "Last.fm 登录指南",
+    "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.": "请启动无线PC上传（Web服务器），并在电脑或手机浏览器中登录Last.fm。",
+    "Start Web Server": "启动Web服务器",
+    "Last.fm Logout": "Last.fm 退出登录",
+    "Are you sure you want to log out from Last.fm?": "确定要退出Last.fm账号吗？",
+    "Logout": "退出登录",
+    "Logged out": "已退出登录",
+    "Not logged in": "未登录"
 }

@@ -1,17 +1,22 @@
 package com.themoon.y1.managers;
 
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -400,7 +405,236 @@ public class SettingsMenuManager {
             }
         });
         main.containerSettingsItems.addView(btnServerMenu);
+
+        final LastFmManager lfm = LastFmManager.getInstance(main);
+        final String statusText = lfm.isEnabled() ? lfm.getUsername() : t("Not logged in");
+        final LinearLayout btnLastFm = createSettingRow(t("Last.fm Scrobbling"), statusText + " 〉");
+        btnLastFm.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                if (lfm.isEnabled()) {
+                    showLastFmLogoutDialog(btnLastFm);
+                } else {
+                    showLastFmLoginGuideDialog();
+                }
+            }
+        });
+        main.containerSettingsItems.addView(btnLastFm);
+
         focusFirstItem();
+    }
+
+    private void showLastFmLoginGuideDialog() {
+        final Dialog dialog = new Dialog(main);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+
+        float d = main.getResources().getDisplayMetrics().density;
+
+        final LinearLayout rootLayout = new LinearLayout(main);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(ThemeManager.getOverlayBackgroundColor() | 0xEE000000);
+        bg.setCornerRadius(15 * d);
+        bg.setStroke((int) (1 * d), 0x33FFFFFF);
+        rootLayout.setBackground(bg);
+        rootLayout.setPadding((int) (16 * d), (int) (18 * d), (int) (16 * d), (int) (16 * d));
+
+        // 1. 타이틀
+        TextView tvTitle = new TextView(main);
+        tvTitle.setText("🎵 " + t("Last.fm Login Guide"));
+        tvTitle.setTextColor(ThemeManager.getTextColorPrimary());
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+        tvTitle.setGravity(Gravity.CENTER);
+        tvTitle.setPadding(0, 0, 0, (int) (12 * d));
+        rootLayout.addView(tvTitle);
+
+        // 2. 설명 메시지 (다국어 지원)
+        TextView tvMsg = new TextView(main);
+        tvMsg.setText(t("Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser."));
+        tvMsg.setTextColor(ThemeManager.getTextColorSecondary());
+        tvMsg.setTextSize(14f);
+        tvMsg.setGravity(Gravity.CENTER);
+        tvMsg.setPadding((int) (4 * d), 0, (int) (4 * d), (int) (16 * d));
+        rootLayout.addView(tvMsg);
+
+        // 휠 조향 장치
+        View.OnKeyListener dialogWheelListener = new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == 21 || keyCode == 19 || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx - 1; i >= 0; i--) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                    if (keyCode == 22 || keyCode == 20 || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx + 1; i < rootLayout.getChildCount(); i++) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+
+        // 3. 웹서버 바로가기 버튼
+        View btnGoServer = main.createListButtonWithIcon("\uE2C6", t("Start Web Server"), 0xFF81C784);
+        btnGoServer.setOnKeyListener(dialogWheelListener);
+        btnGoServer.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                dialog.dismiss();
+                main.changeScreen(10); // 10: STATE_WEBSERVER
+            }
+        });
+        rootLayout.addView(btnGoServer);
+
+        // 4. 닫기 버튼
+        View btnClose = main.createListButtonWithIcon("\uE5CD", t("Cancel"), ThemeManager.getTextColorPrimary());
+        btnClose.setOnKeyListener(dialogWheelListener);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                dialog.dismiss();
+            }
+        });
+        rootLayout.addView(btnClose);
+
+        dialog.setContentView(rootLayout);
+        Window window = dialog.getWindow();
+        if (window != null) window.setLayout((int) (300 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
+        dialog.show();
+
+        rootLayout.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (btnGoServer.isFocusable()) {
+                    btnGoServer.requestFocus();
+                }
+            }
+        }, 50);
+    }
+
+    private void showLastFmLogoutDialog(final LinearLayout btnLastFm) {
+        final Dialog dialog = new Dialog(main);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+
+        float d = main.getResources().getDisplayMetrics().density;
+
+        final LinearLayout rootLayout = new LinearLayout(main);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(ThemeManager.getOverlayBackgroundColor() | 0xEE000000);
+        bg.setCornerRadius(15 * d);
+        bg.setStroke((int) (1 * d), 0x33FFFFFF);
+        rootLayout.setBackground(bg);
+        rootLayout.setPadding((int) (16 * d), (int) (18 * d), (int) (16 * d), (int) (16 * d));
+
+        TextView tvTitle = new TextView(main);
+        tvTitle.setText("🎵 " + t("Last.fm Logout"));
+        tvTitle.setTextColor(ThemeManager.getTextColorPrimary());
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+        tvTitle.setGravity(Gravity.CENTER);
+        tvTitle.setPadding(0, 0, 0, (int) (12 * d));
+        rootLayout.addView(tvTitle);
+
+        TextView tvMsg = new TextView(main);
+        tvMsg.setText(t("Are you sure you want to log out from Last.fm?"));
+        tvMsg.setTextColor(ThemeManager.getTextColorSecondary());
+        tvMsg.setTextSize(14f);
+        tvMsg.setGravity(Gravity.CENTER);
+        tvMsg.setPadding((int) (4 * d), 0, (int) (4 * d), (int) (16 * d));
+        rootLayout.addView(tvMsg);
+
+        View.OnKeyListener dialogWheelListener = new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == 21 || keyCode == 19 || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx - 1; i >= 0; i--) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                    if (keyCode == 22 || keyCode == 20 || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx + 1; i < rootLayout.getChildCount(); i++) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+
+        View btnLogout = main.createListButtonWithIcon("\uE872", t("Logout"), 0xFFFF5555);
+        btnLogout.setOnKeyListener(dialogWheelListener);
+        btnLogout.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                dialog.dismiss();
+                LastFmManager.getInstance(main).logout();
+                ((TextView) btnLastFm.getChildAt(1)).setText(t("Not logged in") + " 〉");
+                main.updatePlayerStatusIndicators();
+                Toast.makeText(main, t("Logged out"), Toast.LENGTH_SHORT).show();
+            }
+        });
+        rootLayout.addView(btnLogout);
+
+        View btnCancel = main.createListButtonWithIcon("\uE5CD", t("Cancel"), ThemeManager.getTextColorPrimary());
+        btnCancel.setOnKeyListener(dialogWheelListener);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                dialog.dismiss();
+            }
+        });
+        rootLayout.addView(btnCancel);
+
+        dialog.setContentView(rootLayout);
+        Window window = dialog.getWindow();
+        if (window != null) window.setLayout((int) (300 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
+        dialog.show();
+
+        rootLayout.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (btnLogout.isFocusable()) {
+                    btnLogout.requestFocus();
+                }
+            }
+        }, 50);
     }
 
     public void buildDataSettingsUI() {
@@ -795,7 +1029,7 @@ public class SettingsMenuManager {
 
         final TextView tvRight = new TextView(main);
         tvRight.setText(rightText);
-        tvRight.setTextColor(ThemeManager.getTextColorSecondary());
+        tvRight.setTextColor(ThemeManager.getTextColorPrimary());
         tvRight.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         tvRight.setGravity(Gravity.RIGHT);
 
@@ -815,7 +1049,7 @@ public class SettingsMenuManager {
                 } else {
                     row.setBackground(main.createButtonBackground(ThemeManager.getListButtonNormalBg()));
                     tvLeft.setTextColor(ThemeManager.getTextColorPrimary());
-                    tvRight.setTextColor(ThemeManager.getTextColorSecondary());
+                    tvRight.setTextColor(ThemeManager.getTextColorPrimary());
                 }
             }
         });

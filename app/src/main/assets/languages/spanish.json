@@ -350,5 +350,17 @@
     "Add to Queue": "Añadir a la cola",
     "Added to Play Next": "Añadido a reproducción siguiente",
     "Added to Queue": "Añadido a la cola",
-    "No playable audio files found.": "No se encontraron archivos de audio reproducibles"
+    "No playable audio files found.": "No se encontraron archivos de audio reproducibles",
+    "Network Error: ": "Error de red: ",
+    "Stream failed: ": "Error de transmisión: ",
+    "Unknown error": "Error desconocido",
+    "Play All Videos": "Reproducir todos los videos",
+    "Last.fm Login Guide": "Guía de inicio de sesión de Last.fm",
+    "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.": "Inicie la carga inalámbrica para PC (servidor web) e inicie sesión en Last.fm desde el navegador de su PC o teléfono inteligente.",
+    "Start Web Server": "Iniciar servidor web",
+    "Last.fm Logout": "Cerrar sesión de Last.fm",
+    "Are you sure you want to log out from Last.fm?": "¿Seguro que desea cerrar sesión en Last.fm?",
+    "Logout": "Cerrar sesión",
+    "Logged out": "Sesión cerrada",
+    "Not logged in": "No conectado"
 }

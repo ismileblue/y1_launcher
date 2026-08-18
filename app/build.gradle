@@ -10,8 +10,10 @@ android {
         applicationId "com.themoon.y1"
         minSdk 17
         targetSdk 35
-        versionCode 52
-        versionName "0.11.5"
+        versionCode 54
+        versionName "0.11.6"
+
+
 // 🚀 [용량 방어막 추가] 상자에서 젤리빈(32비트) 부품 딱 하나만 쏙 빼서 APK에 담아라!
         ndk {
             abiFilters 'armeabi-v7a'
@@ -45,6 +47,9 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+    }
+    buildFeatures {
+        buildConfig = true
     }
 }
 

@@ -1,0 +1,143 @@
+diff --git a/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java b/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
+--- a/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
++++ b/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
+@@ -38,6 +38,10 @@
+     public Y1CrossfeedAudioProcessor crossfeedProcessor = new Y1CrossfeedAudioProcessor();
+ 
+     private float currentSpeed = 1.0f;
++    // 🚀 스트리밍 중엔 currentPlaylist에 가짜(Dummy) File 하나만 들어있으므로,
++    // prepareMusicTrack()의 "파일 존재 확인" 로직을 절대 태우면 안 됩니다!
++    private boolean isStreamingPodcast = false;
++    private boolean lenientHttpsInstalled = false;
+     
+     // 🚀 [취침 예약 타이머]
+     private Handler sleepTimerHandler = new Handler(android.os.Looper.getMainLooper());
+@@ -204,9 +208,46 @@
+ 
+                 @Override
+                 public void onPlayerError(com.google.android.exoplayer2.ExoPlaybackException error) {
++                    if (isStreamingPodcast) {
++                        isStreamingPodcast = false;
++                        final String reason = describeStreamError(error);
++                        MainActivity m = MainActivity.instance;
++                        if (m != null) {
++                            m.runOnUiThread(() -> {
++                                Toast.makeText(m, "⚠️ Stream failed: " + reason, Toast.LENGTH_LONG).show();
++                                m.isPausedByHand = true;
++                                m.updatePlayerUI();
++                            });
++                        }
++                        return;
++                    }
+                     handleTrackError("Cannot play this file.");
+                 }
+             });
++        }
++    }
++
++    // 🚀 ExoPlaybackException을 뭉뚱그리지 않고 실제 원인을 뽑아냅니다 (SSL/리다이렉트/포맷 등 진짜 사유 확인용)
++    private String describeStreamError(com.google.android.exoplayer2.ExoPlaybackException error) {
++        try {
++            Throwable cause;
++            switch (error.type) {
++                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_SOURCE:
++                    cause = error.getSourceException();
++                    break;
++                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_RENDERER:
++                    cause = error.getRendererException();
++                    break;
++                case com.google.android.exoplayer2.ExoPlaybackException.TYPE_UNEXPECTED:
++                    cause = error.getUnexpectedException();
++                    break;
++                default:
++                    cause = error;
++            }
++            String msg = cause != null ? cause.getMessage() : null;
++            return (msg == null || msg.isEmpty()) ? cause.getClass().getSimpleName() : msg;
++        } catch (Exception e) {
++            return "Unknown error";
+         }
+     }
+ 
+@@ -298,6 +339,7 @@
+         final MainActivity main = MainActivity.instance;
+         if (main == null) return;
+ 
++        isStreamingPodcast = false; // 🚀 일반 재생으로 돌아왔으니 스트리밍 플래그 해제!
+         initPlayer(main);
+ 
+         // 1. 외부에서 받은 리스트를 안전하게 복사
+@@ -335,11 +377,37 @@
+         prepareMusicTrack(main.currentIndex);
+         main.updatePlayerUI(); // 🚀 타이머 즉시 시작!
+     }
++    // 🚀 이 기기는 RSS 조회/다운로드 때도 인증서 검증을 전부 무시해야 붙는 서버가 있어서(MainActivity의
++    // trust-all OkHttpClient 참고), ExoPlayer가 쓰는 표준 HttpsURLConnection에도 동일하게 적용해줘야
++    // 스트리밍 시 SSL 핸드셰이크로 조용히 죽는 걸 막을 수 있습니다. 팟캐스트 스트리밍 시작 시 1회만 설치합니다.
++    private void ensureLenientHttpsDefaults() {
++        if (lenientHttpsInstalled) return;
++        try {
++            javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
++                    new javax.net.ssl.X509TrustManager() {
++                        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
++                            return new java.security.cert.X509Certificate[]{};
++                        }
++                        public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
++                        public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
++                    }
++            };
++            javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
++            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
++            javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
++            javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
++            lenientHttpsInstalled = true;
++        } catch (Exception e) {}
++    }
++
+     public void playPodcastStream(String url, String title, String imageUrl, String channelName, int offsetMs) {
+         final MainActivity main = MainActivity.instance;
+         if (main == null) return;
+ 
+         try {
++            isStreamingPodcast = true;
++            ensureLenientHttpsDefaults(); // 🚀 다운로드/RSS와 동일하게 인증서 검증을 완화해야 이 기기에서 HTTPS 스트림이 열립니다!
++
+             // 🚀 [레거시 찌꺼기 완벽 삭제!] 오직 무적의 ExoPlayer만 사용합니다!
+             if (exoPlayer == null) initPlayer(main.getApplicationContext());
+             else { exoPlayer.stop(); exoPlayer.clearMediaItems(); }
+@@ -352,7 +420,12 @@
+             main.currentIndex = 0;
+ 
+             com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(android.net.Uri.parse(url));
+-            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"));
++            // 🚀 [핵심 수정] 팟캐스트 트래커/CDN 리다이렉트(http<->https 302 등)를 허용하고 타임아웃을 넉넉히 줍니다.
++            com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory httpDataSourceFactory =
++                    new com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory(
++                            com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"),
++                            15000, 15000, true);
++            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, httpDataSourceFactory);
+             com.google.android.exoplayer2.extractor.DefaultExtractorsFactory extractorsFactory = new com.google.android.exoplayer2.extractor.DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
+             com.google.android.exoplayer2.source.MediaSource mediaSource = new com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
+ 
+@@ -441,7 +514,11 @@
+ 
+             exoPlayer.setPlayWhenReady(true);
+ 
+-        } catch (Exception e) {}
++        } catch (Exception e) {
++            isStreamingPodcast = false;
++            final String msg = e.getMessage();
++            main.runOnUiThread(() -> Toast.makeText(main, "⚠️ Stream failed: " + (msg == null ? "Unknown error" : msg), Toast.LENGTH_LONG).show());
++        }
+     }
+     public void playTrackListWithOffset(List<File> list, int index, int offsetMs) {
+         playTrackList(list, index);
+@@ -544,6 +621,8 @@
+     public void prepareMusicTrack(int index) {
+         final MainActivity main = MainActivity.instance;
+         if (main == null || main.currentPlaylist.isEmpty()) return;
++        // 🚀 스트리밍 중엔 currentPlaylist에 실존하지 않는 더미 File만 들어있으므로 여기서 손대면 안 됩니다!
++        if (isStreamingPodcast) return;
+ 
+         final File track = main.currentPlaylist.get(index);
+         main.lastAlbumArtBytes = null;

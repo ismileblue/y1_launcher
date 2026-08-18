@@ -350,5 +350,17 @@
     "Add to Queue": "Add to Queue",
     "Added to Play Next": "Added to Play Next",
     "Added to Queue": "Added to Queue",
-    "No playable audio files found.": "No playable audio files found."
+    "No playable audio files found.": "No playable audio files found.",
+    "Network Error: ": "Network Error: ",
+    "Stream failed: ": "Stream failed: ",
+    "Unknown error": "Unknown error",
+    "Play All Videos": "Play All Videos",
+    "Last.fm Login Guide": "Last.fm Login Guide",
+    "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.": "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.",
+    "Start Web Server": "Start Web Server",
+    "Last.fm Logout": "Last.fm Logout",
+    "Are you sure you want to log out from Last.fm?": "Are you sure you want to log out from Last.fm?",
+    "Logout": "Logout",
+    "Logged out": "Logged out",
+    "Not logged in": "Not logged in"
 }

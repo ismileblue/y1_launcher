@@ -120,6 +120,7 @@
     "Pop": "팝",
     "Rock": "록",
     "Radio": "라디오",
+    "FM Radio": "FM 라디오",
     "PC Upload": "PC 업로드",
     "Library": "라이브러리",
     "Now Playing": "지금 재생 중",
@@ -351,5 +352,17 @@
     "Add to Queue": "현재 재생 목록 끝에 추가",
     "Added to Play Next": "다음 곡으로 예약되었습니다.",
     "Added to Queue": "현재 재생 목록에 추가되었습니다.",
-    "No playable audio files found.": "재생 가능한 음악 파일이 없습니다."
+    "No playable audio files found.": "재생 가능한 음악 파일이 없습니다.",
+    "Network Error: ": "통신 에러: ",
+    "Stream failed: ": "스트리밍 재생 실패: ",
+    "Unknown error": "알 수 없는 오류",
+    "Play All Videos": "전체 이어서 재생",
+    "Last.fm Login Guide": "Last.fm 로그인 안내",
+    "Please start Wireless PC Upload (Web Server) and log in to Last.fm from your PC or smartphone browser.": "무선 PC 업로드(웹 서버)를 실행한 후, PC 또는 스마트폰 브라우저에서 Last.fm에 로그인해 주세요.",
+    "Start Web Server": "웹 서버 실행",
+    "Last.fm Logout": "Last.fm 로그아웃",
+    "Are you sure you want to log out from Last.fm?": "Last.fm 계정에서 로그아웃하시겠습니까?",
+    "Logout": "로그아웃",
+    "Logged out": "로그아웃되었습니다.",
+    "Not logged in": "로그인 안 됨"
 }

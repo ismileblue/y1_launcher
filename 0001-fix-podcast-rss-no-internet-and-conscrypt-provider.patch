@@ -1,0 +1,25 @@
+﻿diff --git a/app/src/main/java/com/themoon/y1/MainActivity.java b/app/src/main/java/com/themoon/y1/MainActivity.java
+index 4e0afb6..1bbf27b 100644
+--- a/app/src/main/java/com/themoon/y1/MainActivity.java
++++ b/app/src/main/java/com/themoon/y1/MainActivity.java
+@@ -1405,7 +1405,8 @@ public class MainActivity extends Activity {
+                 "libopensles_sink.so",
+                 "libffmpegJNI.so",
+                 "libflacJNI.so",
+-                "libopusV2JNI.so"
++                "libopusV2JNI.so",
++                "libconscrypt_jni.so"
+         };
+ 
+         boolean needInstall = false;
+@@ -7798,8 +7799,8 @@ public class MainActivity extends Activity {
+                         savePodcastCache(channelName, episodes);
+                     }
+                 } catch (final Exception e) {
+-                    // runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 통신
+-                    // 에러: " + e.toString(), android.widget.Toast.LENGTH_LONG).show());
++                    android.util.Log.e("PodcastFetch", "RSS fetch/parse failed for " + rssUrl, e);
++                    runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 통신 에러: " + e.toString(), android.widget.Toast.LENGTH_LONG).show());
+                 }
+ 
+                 runOnUiThread(new Runnable() {

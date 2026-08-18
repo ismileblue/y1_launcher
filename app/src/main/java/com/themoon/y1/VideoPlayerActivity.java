@@ -49,6 +49,8 @@ public class VideoPlayerActivity extends Activity {
     // 자막(SRT) 파서 금고
     private TreeMap<Integer, String> subtitlesMap = new TreeMap<>();
     private AudioManager audioManager;
+    private java.util.ArrayList<String> videoPlaylist;
+    private int videoIndex = 0;
 
     @Override
     protected void onResume() {
@@ -94,7 +96,13 @@ public class VideoPlayerActivity extends Activity {
         } catch (Exception e) {
         }
 
+        videoPlaylist = getIntent().getStringArrayListExtra("VIDEO_PLAYLIST");
+        videoIndex = getIntent().getIntExtra("VIDEO_INDEX", 0);
         videoPath = getIntent().getStringExtra("VIDEO_PATH");
+
+        if ((videoPath == null || videoPath.isEmpty()) && videoPlaylist != null && !videoPlaylist.isEmpty() && videoIndex >= 0 && videoIndex < videoPlaylist.size()) {
+            videoPath = videoPlaylist.get(videoIndex);
+        }
 
         if (videoPath == null || !new File(videoPath).exists()) {
             Toast.makeText(this, "⚠️ Invalid Video File", Toast.LENGTH_SHORT).show();
@@ -148,8 +156,29 @@ public class VideoPlayerActivity extends Activity {
         videoView.setOnCompletionListener(mp -> {
             getSharedPreferences("y1_prefs", MODE_PRIVATE).edit().putInt("video_pos_" + videoPath, 0).apply();
             lastKnownPosition = 0;
-            finish();
+            playNextVideoInPlaylist();
         });
+    }
+
+    private void playNextVideoInPlaylist() {
+        if (videoPlaylist != null && videoIndex + 1 < videoPlaylist.size()) {
+            videoIndex++;
+            videoPath = videoPlaylist.get(videoIndex);
+            File f = new File(videoPath);
+            if (f.exists()) {
+                Toast.makeText(this, "▶ " + f.getName(), Toast.LENGTH_SHORT).show();
+                subtitlesMap.clear();
+                tvSubtitle.setVisibility(View.GONE);
+                loadSubtitles(videoPath);
+
+                videoView.stopPlayback();
+                videoView.setVideoURI(Uri.parse(videoPath));
+                videoView.start();
+                showControls(false);
+                return;
+            }
+        }
+        finish();
     }
 
     private Runnable hideUITask = () -> {
