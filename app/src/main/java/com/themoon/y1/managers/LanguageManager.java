@@ -134,23 +134,22 @@ public class LanguageManager {
         }
     }
 
-    // 🚀 [핵심 기술] 화면에 글씨를 그리기 직전에, 단어장을 뒤져보고 번역본이 있으면 바꿔서 내보냅니다!
+    // 🚀 [초고속 단어장 검색 엔진 - O(1) 단일 룩업 최적화]
     public String t(String originalText) {
         if (originalText == null) return "";
+        if (dictionary.isEmpty()) return originalText;
 
-        // 아이콘 등 보이지 않는 문자가 앞에 섞여 있을 경우를 대비해 원본 그대로 검색
-        if (dictionary.containsKey(originalText)) {
-            return dictionary.get(originalText);
+        String translated = dictionary.get(originalText);
+        if (translated != null) {
+            return translated;
         }
 
-        // 만약 완벽히 일치하지 않는다면 양쪽 공백을 제거하고 다시 한 번 검색
         String trimmed = originalText.trim();
-        if (dictionary.containsKey(trimmed)) {
-            // 원본의 앞뒤 공백이나 이모지 형태를 유지하기 위해 살짝 가공
-            return originalText.replace(trimmed, dictionary.get(trimmed));
+        translated = dictionary.get(trimmed);
+        if (translated != null) {
+            return originalText.replace(trimmed, translated);
         }
 
-        // 번역팩에 해당 단어가 없으면 그냥 원래 영어 단어를 그대로 내보냅니다.
         return originalText;
     }
 }

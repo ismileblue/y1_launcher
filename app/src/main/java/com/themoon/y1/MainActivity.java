@@ -18,6 +18,7 @@ import android.graphics.BitmapFactory;
 
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.media.MediaMetadataRetriever;
@@ -631,7 +632,10 @@ public class MainActivity extends Activity {
                 tvFocusPreviewClock.setText(sdf.format(new Date()));
             }
 
-            refreshWidgets(); // 홈 스크린 위젯 동시 새로고침
+            // 🚀 [최적화] 메인 메뉴 화면이고 위젯이 켜져 있을 때만 위젯 갱신을 실행하여 불필요한 1초 주기 CPU 부하 제거!
+            if (currentScreenState == STATE_MENU && (isWidgetClockOn || isWidgetBatteryOn || isWidgetAlbumOn)) {
+                refreshWidgets();
+            }
             clockHandler.postDelayed(this, 1000);
         }
     };
@@ -1001,13 +1005,25 @@ public class MainActivity extends Activity {
 
             if (Intent.ACTION_SCREEN_OFF.equals(action)) {
                 isScreenSleeping = true;
-                autoManageWifiPower(true); // 🚀 [절전 모드 진입]
-                updateBatteryStatsMode();
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        autoManageWifiPower(true); // 🚀 [절전 모드 진입 백그라운드 처리]
+                        updateBatteryStatsMode();
+                    }
+                }).start();
             } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
                 isScreenSleeping = false;
                 lastScreenOnTime = System.currentTimeMillis();
-                autoManageWifiPower(false); // 🚀 [절전 모드 해제]
-                updateBatteryStatsMode();
+
+                // 🚀 무거운 네트워크/통계/전원 관리는 100% 백그라운드 스레드로 분리하여 메인 UI 스레드 멈춤 원천 차단!
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        autoManageWifiPower(false); // 🚀 [절전 모드 해제]
+                        updateBatteryStatsMode();
+                    }
+                }).start();
 
                 // =======================================================
                 // 🚀 [LCD 딥슬립 강제 기상 충격기]
@@ -3129,22 +3145,60 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 🚀 [부분 스캔 1단계] 삭제된 파일 감지 (기존 바구니 정리)
-                java.util.Iterator<SongItem> itMusic = customLibrary.iterator();
-                while (itMusic.hasNext()) {
-                    SongItem item = itMusic.next();
-                    if (!item.file.exists()) {
-                        trackNumberMap.remove(item.file.getAbsolutePath());
-                        itMusic.remove(); // 파일이 지워졌으면 장부에서 즉시 파쇄!
+                // Re-probe volumes so all mounted storages are detected
+                StoragePaths.invalidate();
+                rootFolder = StoragePaths.getMusicDir();
+                audiobookRootFolder = StoragePaths.getAudiobooksDir();
+
+                // 🚀 [스토리지 마운트 방어막] 스토리지 루트가 아예 안 잡히거나 접근 불가능한 상태라면 기존 라이브러리를 절대 비우지 않습니다!
+                List<java.io.File> musicDirs = StoragePaths.getMusicDirs();
+                List<java.io.File> bookDirs = StoragePaths.getAudiobooksDirs();
+                boolean isStorageAccessible = false;
+                for (java.io.File md : musicDirs) {
+                    if (md.exists() && md.isDirectory()) {
+                        isStorageAccessible = true;
+                        break;
+                    }
+                }
+                if (!isStorageAccessible) {
+                    for (java.io.File bd : bookDirs) {
+                        if (bd.exists() && bd.isDirectory()) {
+                            isStorageAccessible = true;
+                            break;
+                        }
                     }
                 }
 
-                java.util.Iterator<SongItem> itBook = audiobookLibrary.iterator();
-                while (itBook.hasNext()) {
-                    SongItem item = itBook.next();
-                    if (!item.file.exists()) {
-                        trackNumberMap.remove(item.file.getAbsolutePath());
-                        itBook.remove(); // 파일이 지워졌으면 장부에서 즉시 파쇄!
+                // 만약 스토리지 폴더 자체가 마운트 안 되어 안 열리는 상황인데, 기존 라이브러리에 곡이 있었다면? 절대 장부를 파쇄하지 않고 보존!
+                if (!isStorageAccessible && (!customLibrary.isEmpty() || !audiobookLibrary.isEmpty())) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            isCustomScanning = false;
+                            Toast.makeText(MainActivity.this, t("Storage is mounting or inaccessible. Library preserved."), Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    return;
+                }
+
+                // 🚀 [부분 스캔 1단계] 스토리지가 정상 접근 가능할 때만 삭제된 파일 감지
+                if (isStorageAccessible) {
+                    java.util.Iterator<SongItem> itMusic = customLibrary.iterator();
+                    while (itMusic.hasNext()) {
+                        SongItem item = itMusic.next();
+                        if (!item.file.exists()) {
+                            trackNumberMap.remove(item.file.getAbsolutePath());
+                            itMusic.remove(); // 파일이 지워졌으면 장부에서 즉시 파쇄!
+                        }
+                    }
+
+                    java.util.Iterator<SongItem> itBook = audiobookLibrary.iterator();
+                    while (itBook.hasNext()) {
+                        SongItem item = itBook.next();
+                        if (!item.file.exists()) {
+                            trackNumberMap.remove(item.file.getAbsolutePath());
+                            itBook.remove(); // 파일이 지워졌으면 장부에서 즉시 파쇄!
+                        }
                     }
                 }
 
@@ -3159,11 +3213,6 @@ public class MainActivity extends Activity {
 
                 totalAudioFiles = 0;
                 scannedAudioFiles = 0;
-
-                // Re-probe volumes so Y2 microSD (/storage/sdcard1) is included after insert.
-                StoragePaths.invalidate();
-                rootFolder = StoragePaths.getMusicDir();
-                audiobookRootFolder = StoragePaths.getAudiobooksDir();
 
                 // Count + scan Music/Audiobooks on every volume (sdcard0 + sdcard1).
                 for (java.io.File musicDir : StoragePaths.getMusicDirs())
@@ -3180,24 +3229,26 @@ public class MainActivity extends Activity {
                 filterDuplicateSongs(customLibrary);
                 filterDuplicateSongs(audiobookLibrary);
 
-                // 즐겨찾기 자동 청소기
-                HashSet<String> aliveSongs = new HashSet<>();
-                for (SongItem song : customLibrary)
-                    aliveSongs.add(song.file.getAbsolutePath());
-                for (SongItem book : audiobookLibrary)
-                    aliveSongs.add(book.file.getAbsolutePath());
+                // 즐겨찾기 자동 청소기 (스토리지가 유효하게 스캔되었을 때만 동기화)
+                if (isStorageAccessible && (!customLibrary.isEmpty() || !audiobookLibrary.isEmpty())) {
+                    HashSet<String> aliveSongs = new HashSet<>();
+                    for (SongItem song : customLibrary)
+                        aliveSongs.add(song.file.getAbsolutePath());
+                    for (SongItem book : audiobookLibrary)
+                        aliveSongs.add(book.file.getAbsolutePath());
 
-                boolean isCleanedUp = false;
-                java.util.Iterator<String> favIterator = favoritePaths.iterator();
-                while (favIterator.hasNext()) {
-                    String favPath = favIterator.next();
-                    if (!aliveSongs.contains(favPath)) {
-                        favIterator.remove();
-                        isCleanedUp = true;
+                    boolean isCleanedUp = false;
+                    java.util.Iterator<String> favIterator = favoritePaths.iterator();
+                    while (favIterator.hasNext()) {
+                        String favPath = favIterator.next();
+                        if (!aliveSongs.contains(favPath)) {
+                            favIterator.remove();
+                            isCleanedUp = true;
+                        }
                     }
+                    if (isCleanedUp)
+                        prefs.edit().putStringSet("favorites", favoritePaths).commit();
                 }
-                if (isCleanedUp)
-                    prefs.edit().putStringSet("favorites", favoritePaths).commit();
 
                 runOnUiThread(new Runnable() {
                     @Override
@@ -3591,6 +3642,7 @@ public class MainActivity extends Activity {
 
     private void applyThemeToMainMenu() {
         try {
+            clearButtonBackgroundCache();
             updateMainMenuLanguage();
             if (ivMainBg != null) {
                 int themeColor = ThemeManager.getOverlayBackgroundColor();
@@ -4635,24 +4687,41 @@ public class MainActivity extends Activity {
         }
     }
 
-    // 💡 [추가] 테마 색상과 '둥글기(Radius)'를 혼합해서 버튼의 배경 디자인을 찍어내는 도구
+    // 💡 [초고속 캐싱] 휠을 빠르게 돌릴 때 GC(Stop-The-World) 멈춤을 방지하기 위한 배경 드로어블 캐시
+    private final android.util.SparseArray<GradientDrawable.ConstantState> buttonBackgroundCache = new android.util.SparseArray<>();
+
     public GradientDrawable createButtonBackground(int color) {
+        int radius = ThemeManager.getButtonRadius();
+        int key = (color & 0x00FFFFFF) ^ (radius << 24) ^ (color >>> 8);
+        GradientDrawable.ConstantState state = buttonBackgroundCache.get(key);
+        if (state != null) {
+            return (GradientDrawable) state.newDrawable();
+        }
+
         GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color); // 테마 색상 주입
-        // 테마에 설정된 둥글기(Radius) 값 주입 (dp 단위를 픽셀로 변환하여 적용)
-        float radius = ThemeManager.getButtonRadius() * getResources().getDisplayMetrics().density;
-        shape.setCornerRadius(radius);
+        shape.setColor(color);
+        float rPx = radius * getResources().getDisplayMetrics().density;
+        shape.setCornerRadius(rPx);
+        buttonBackgroundCache.put(key, shape.getConstantState());
         return shape;
+    }
+
+    public void clearButtonBackgroundCache() {
+        buttonBackgroundCache.clear();
     }
 
     // 💡 [수정] 메인 화면의 버튼들에 휠이 닿았을 때의 색상을 테마 엔진과 연결합니다!
     private void setupMenuButton(final Button btn, final int imageResId, final String iconFileName) {
         btn.setSoundEffectsEnabled(false);
+        final GradientDrawable normalBg = createButtonBackground(ThemeManager.getListButtonNormalBg());
+        final GradientDrawable focusedBg = createButtonBackground(ThemeManager.getListButtonFocusedBg());
+        btn.setBackground(normalBg);
+
         btn.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
-                    btn.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg())); // 🚀 둥글기 적용
+                    btn.setBackground(focusedBg); // 🚀 사전 생성된 캐시 드로어블 주입 (0 alloc)
                     btn.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     // 🚀 [수정] 재생 상태를 확인하여 초기 아이콘(원형)과 빈 앨범 아이콘(사각형)을 완벽하게 구분합니다!
                     boolean anyWidgetActive = isWidgetClockOn || isWidgetBatteryOn || isWidgetAlbumOn;
@@ -4888,7 +4957,19 @@ public class MainActivity extends Activity {
         }
     }
 
-    // 💡 [수정] 스토리지 상세 정보 텍스트 적용 및 UI 크기/위치 최적화
+    private String formatStorageSize(long megabytes) {
+        if (megabytes >= 1024 * 1024) {
+            double tb = megabytes / (1024.0 * 1024.0);
+            return String.format(java.util.Locale.US, "%.2f TB", tb);
+        } else if (megabytes >= 1024) {
+            double gb = megabytes / 1024.0;
+            return String.format(java.util.Locale.US, "%.2f GB", gb);
+        } else {
+            return megabytes + " MB";
+        }
+    }
+
+    // 💡 [수정] 스토리지 상세 정보 텍스트 적용 및 UI 크기/위치 최적화 (대용량 TB/GB 표기 및 마운트 상태 안내)
     private void loadStorageUI() {
         try {
             android.os.StatFs stat = new android.os.StatFs(StoragePaths.getPrimaryRoot().getAbsolutePath());
@@ -4897,7 +4978,7 @@ public class MainActivity extends Activity {
             long blockSize = (long) stat.getBlockSize();
             long total = ((long) stat.getBlockCount() * blockSize) / (1024 * 1024);
             long free = ((long) stat.getAvailableBlocks() * blockSize) / (1024 * 1024);
-            long used = total - free;
+            long used = Math.max(0, total - free);
 
             if (pbStorage != null)
                 pbStorage.setVisibility(View.GONE);
@@ -4933,11 +5014,19 @@ public class MainActivity extends Activity {
             int themeColor = ThemeManager.getListButtonFocusedBg() | 0xFF000000;
             pieChart.setStorageData(used, total, themeColor);
 
+            boolean isExternalMounted = com.themoon.y1.managers.ExternalSdMountMonitor.isPrimaryReady() 
+                    || com.themoon.y1.managers.ExternalSdMountMonitor.isSecondaryReady();
+            String titlePrefix = isExternalMounted ? t("MicroSD Card") : (total < 600 ? t("Internal Flash") + " (eMMC)" : t("Storage"));
+            if (!isExternalMounted && total < 600) {
+                titlePrefix += "\n(" + t("SD Card Mounting / Not Detected") + ")";
+            }
+
             // 텍스트 정보 세팅 및 화면 강제 노출
             tvStorageDetails.setText(
-                    t("Total Capacity") + " :  " + total + " MB\n" +
-                            t("Used Space") + " :  " + used + " MB\n" +
-                            t("Free Space") + " :  " + free + " MB");
+                    "[" + titlePrefix + "]\n" +
+                    t("Total Capacity") + " :  " + formatStorageSize(total) + "\n" +
+                    t("Used Space") + " :  " + formatStorageSize(used) + "\n" +
+                    t("Free Space") + " :  " + formatStorageSize(free));
             tvStorageDetails.setGravity(Gravity.CENTER);
 
             // 🚀 [수술 3] 글자 크기를 18f로 큼직하게 올리고, 줄 간격도 답답하지 않게 1.2배로 벌려줍니다!
@@ -5892,7 +5981,9 @@ public class MainActivity extends Activity {
         rowButton.setFocusable(true);
         rowButton.setClickable(true);
         rowButton.setSoundEffectsEnabled(false);
-        rowButton.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
+        final GradientDrawable normalBg = createButtonBackground(ThemeManager.getListButtonNormalBg());
+        final GradientDrawable focusedBg = createButtonBackground(ThemeManager.getListButtonFocusedBg());
+        rowButton.setBackground(normalBg);
 
         int padLeft = (int) (25 * d);
         int padTopBottom = (int) (12 * d);
@@ -5950,14 +6041,14 @@ public class MainActivity extends Activity {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
-                    rowButton.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg()));
+                    rowButton.setBackground(focusedBg);
                     tvIcon.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     tvText.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     tvText.setSelected(true); // 🚀 휠이 닿으면 텍스트가 흐르기 시작!
                     showFastScrollLetter(tvText.getText().toString());
                 } else {
                     // 🚀 [포커스 복구 버그 완전 해결] 포커스가 빠져나갈 때 흰색으로 리셋되지 않고, 처음에 칠했던 색상으로 정확히 복귀합니다!
-                    rowButton.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
+                    rowButton.setBackground(normalBg);
                     tvIcon.setTextColor(normalColor);
                     tvText.setTextColor(normalColor);
                     tvText.setSelected(false); // 🚀 휠이 벗어나면 텍스트 정지!
@@ -5971,8 +6062,10 @@ public class MainActivity extends Activity {
     public Button createListButton(String text) {
         final Button btn = new Button(this);
 
-        // 🚀 [수정 완료] 단색 덮어쓰기(setBackgroundColor)를 삭제하고, 둥글기가 적용된 배경만 입힙니다!
-        btn.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
+        // 🚀 [수정 완료] 사전 생성된 캐시 드로어블을 바인딩하여 휠 조작 시 0 alloc 유지
+        final GradientDrawable normalBg = createButtonBackground(ThemeManager.getListButtonNormalBg());
+        final GradientDrawable focusedBg = createButtonBackground(ThemeManager.getListButtonFocusedBg());
+        btn.setBackground(normalBg);
         btn.setTypeface(ThemeManager.getCustomFont(), Typeface.NORMAL);
         btn.setSoundEffectsEnabled(false);
         btn.setText(t(text));
@@ -6001,14 +6094,14 @@ public class MainActivity extends Activity {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (hasFocus) {
-                    // 🚀 포커스 상태 둥근 배경 적용!
-                    btn.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg()));
+                    // 🚀 포커스 상태 둥근 배경 적용! (0 alloc)
+                    btn.setBackground(focusedBg);
                     btn.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     btn.setSelected(true); // 🚀 텍스트 흐르기 시작!
                     showFastScrollLetter(((Button) v).getText().toString());
                 } else {
-                    // 🚀 일반 상태 둥근 배경 적용!
-                    btn.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
+                    // 🚀 일반 상태 둥근 배경 적용! (0 alloc)
+                    btn.setBackground(normalBg);
                     btn.setTextColor(ThemeManager.getTextColorPrimary());
                     btn.setSelected(false); // 🚀 텍스트 흐르기 정지!
                 }
@@ -8466,8 +8559,11 @@ public class MainActivity extends Activity {
             // 0번부터 깔끔하게 열리도록 1회성 기억 변수를 사용 후 깨끗하게 비워줍니다.
             virtualQueryType = "";
             virtualQueryValue = "";
+        } else if (currentCoverFlowIndex >= 0 && currentCoverFlowIndex < uniqueAlbumList.size()) {
+            // 🚀 [인덱스 보존 방어막] 이미 커버플로우 화면을 보고 있던 중 리스캔이나 화면 갱신이 발생한 경우,
+            // 0번으로 튕겨 돌아가지 않고 보고 있던 앨범 위치를 그대로 보존합니다!
         } else {
-            // 일반적인 최초 진입 시에는 원래 설계대로 0번 인덱스 장전
+            // 범위 밖이거나 최초 진입인 경우 0번 인덱스 장전
             currentCoverFlowIndex = 0;
         }
 
@@ -9249,7 +9345,7 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 🚀 [초고속 라이브러리 캐시 불러오기 엔진]
+    // 🚀 [초고속 라이브러리 캐시 불러오기 엔진 - 부팅 시 마운트 대기 보호]
     private boolean loadLibraryFromCache() {
         File cacheFile = new File(getFilesDir(), "library_cache.txt");
         if (!cacheFile.exists()) return false;
@@ -9265,10 +9361,12 @@ public class MainActivity extends Activity {
                 String[] p = line.split("\\|");
                 if (p.length >= 8) {
                     File f = new File(p[1]);
-                    if (!f.exists()) continue; // 💡 지워진 파일은 스킵하여 자동 청소!
-
+                    // 💡 [핵심 방어막] 부팅 직후 SD 카드가 아직 마운트 중이더라도 캐시 명단을 파쇄하지 않고 온전히 복원!
                     SongItem item = new SongItem(f, p[2], p[3], p[4], p[5], p[6]);
-                    int tNum = Integer.parseInt(p[7]);
+                    int tNum = 0;
+                    try {
+                        tNum = Integer.parseInt(p[7]);
+                    } catch (Exception ignored) {}
 
                     if (p[0].equals("M")) customLibrary.add(item);
                     else audiobookLibrary.add(item);
@@ -11327,8 +11425,8 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
         }
 
-        boolean isWakingUp = !isScreenOn || ((event.getFlags() & KeyEvent.FLAG_WOKE_HERE) != 0)
-                || (System.currentTimeMillis() - lastScreenOnTime < 500);
+        // 🚀 화면이 켜져 있는 상태라면 바로 휠/키 입력을 처리하고, 화면이 실제로 꺼져있거나 이번 키가 기상 신호일 때만 인터셉트!
+        boolean isWakingUp = !isScreenOn || ((event.getFlags() & KeyEvent.FLAG_WOKE_HERE) != 0);
 
         if (isWakingUp) {
             if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
@@ -12070,6 +12168,19 @@ public class MainActivity extends Activity {
                 }
             }
             View c = getCurrentFocus();
+            if (c == null) {
+                // 🚀 [포커스 자동 복구] 기상 후 포커스를 잃어버렸다면 첫 번째 버튼에 즉시 포커스 부여!
+                if (currentScreenState == STATE_MENU && btnNowPlaying != null) {
+                    btnNowPlaying.requestFocus();
+                    c = btnNowPlaying;
+                } else if (containerBrowserItems != null && containerBrowserItems.getChildCount() > 0) {
+                    containerBrowserItems.getChildAt(0).requestFocus();
+                    c = containerBrowserItems.getChildAt(0);
+                } else if (containerSettingsItems != null && containerSettingsItems.getChildCount() > 0) {
+                    containerSettingsItems.getChildAt(0).requestFocus();
+                    c = containerSettingsItems.getChildAt(0);
+                }
+            }
             if (c != null) {
                 if (keyCode == 21) { // 휠 위로 돌릴 때 (UP)
 
@@ -12281,14 +12392,19 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
 
-        // 3. 젤리빈 4.2.2 및 하드웨어 버튼 연동: Power 키(26) 전송으로 화면 강제 소생!
-        try {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null && !pm.isScreenOn()) {
-                Runtime.getRuntime().exec(new String[] { "su", "-c", "input keyevent 26" });
+        // 3. 젤리빈 4.2.2 및 하드웨어 버튼 연동: Power 키(26) 전송을 백그라운드로 돌려 메인 스레드 멈춤 방지!
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                    if (pm != null && !pm.isScreenOn()) {
+                        Process proc = Runtime.getRuntime().exec(new String[] { "su", "-c", "input keyevent 26" });
+                        proc.waitFor();
+                    }
+                } catch (Exception ignored) {}
             }
-        } catch (Exception ex) {
-        }
+        }).start();
     }
 
     @Override

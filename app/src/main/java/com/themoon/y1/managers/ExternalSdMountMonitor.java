@@ -26,9 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class ExternalSdMountMonitor {
     private static final String TAG = "Y1SdMount";
+    private static final String PRIMARY = StoragePaths.PRIMARY_PATH;
     private static final String SECONDARY = StoragePaths.SECONDARY_PATH;
     private static final long POLL_MS = 12_000L;
-    private static final long MOUNT_COOLDOWN_MS = 45_000L;
+    private static final long MOUNT_COOLDOWN_MS = 30_000L;
     private static final int CMD_TIMEOUT_MS = 8_000;
 
     public interface Listener {
@@ -37,13 +38,15 @@ public final class ExternalSdMountMonitor {
     }
 
     private final Context appContext;
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private android.os.HandlerThread bgThread;
+    private Handler bgHandler;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean mountInFlight = new AtomicBoolean(false);
     private Listener listener;
     private BroadcastReceiver mediaReceiver;
     private long lastMountAttemptMs;
-    private boolean lastReady;
+    private boolean lastPriReady = false;
+    private boolean lastSecReady = false;
 
     private final Runnable pollTask = new Runnable() {
         @Override
@@ -51,7 +54,9 @@ public final class ExternalSdMountMonitor {
             if (!running.get())
                 return;
             checkAndMaybeMount("poll");
-            mainHandler.postDelayed(this, POLL_MS);
+            if (bgHandler != null && running.get()) {
+                bgHandler.postDelayed(this, POLL_MS);
+            }
         }
     };
 
@@ -64,28 +69,43 @@ public final class ExternalSdMountMonitor {
     }
 
     public void start() {
-        if (!hasSecondarySlot()) {
-            Log.i(TAG, "no /storage/sdcard1 slot — monitor idle (Y1-compatible)");
-            return;
-        }
         if (!running.compareAndSet(false, true))
             return;
 
+        if (bgThread == null || !bgThread.isAlive()) {
+            bgThread = new android.os.HandlerThread("y1-sd-monitor-bg");
+            bgThread.start();
+            bgHandler = new Handler(bgThread.getLooper());
+        }
+
         registerMediaReceiver();
-        mainHandler.post(pollTask);
-        // Immediate first pass after boot / resume.
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                checkAndMaybeMount("start");
-            }
-        }, "y1-sd-mount-start").start();
+        if (bgHandler != null) {
+            bgHandler.post(pollTask);
+            bgHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    checkAndMaybeMount("start");
+                }
+            });
+        }
     }
 
     public void stop() {
         running.set(false);
-        mainHandler.removeCallbacks(pollTask);
+        if (bgHandler != null) {
+            bgHandler.removeCallbacks(pollTask);
+            bgHandler = null;
+        }
+        if (bgThread != null) {
+            bgThread.quit();
+            bgThread = null;
+        }
         unregisterMediaReceiver();
+    }
+
+    /** True when primary storage (/storage/sdcard0) is mounted. */
+    public static boolean isPrimaryReady() {
+        return mountsContain(PRIMARY) || mountsContain("/mnt/media_rw/sdcard0");
     }
 
     /** True when apps can list the secondary volume (FUSE up). */
@@ -108,18 +128,27 @@ public final class ExternalSdMountMonitor {
     }
 
     private void checkAndMaybeMount(String reason) {
-        boolean ready = isSecondaryReady();
-        if (ready) {
-            if (!lastReady) {
-                Log.i(TAG, "secondary ready (" + reason + ")");
-                StoragePaths.invalidate();
-                notifyReady();
-            }
-            lastReady = true;
+        boolean priReady = isPrimaryReady();
+        boolean secReady = isSecondaryReady();
+
+        boolean newlyMounted = (priReady && !lastPriReady) || (secReady && !lastSecReady);
+
+        lastPriReady = priReady;
+        lastSecReady = secReady;
+
+        if (newlyMounted) {
+            Log.i(TAG, "Storage volume newly mounted (pri=" + priReady + ", sec=" + secReady + ", reason=" + reason + ")");
+            StoragePaths.invalidate();
+            notifyReady();
             return;
         }
-        lastReady = false;
 
+        // If at least one volume is ready, we are in a normal/healthy operating state.
+        if (priReady || secReady) {
+            return;
+        }
+
+        // If NO storage volume is ready at all (both sdcard0 and sdcard1 unmounted):
         long now = System.currentTimeMillis();
         if (now - lastMountAttemptMs < MOUNT_COOLDOWN_MS)
             return;
@@ -128,15 +157,18 @@ public final class ExternalSdMountMonitor {
         lastMountAttemptMs = now;
 
         try {
-            Log.i(TAG, "secondary not ready (" + reason + ") — attempting remount");
+            Log.i(TAG, "No storage mounted (pri=" + priReady + ", sec=" + secReady + ", " + reason + ") — attempting emergency remount");
             boolean ok = attemptRemount();
-            if (ok && isSecondaryReady()) {
-                Log.i(TAG, "remount succeeded");
+            boolean afterPri = isPrimaryReady();
+            boolean afterSec = isSecondaryReady();
+            if (ok && (afterPri || afterSec)) {
+                Log.i(TAG, "Emergency remount succeeded (pri=" + afterPri + ", sec=" + afterSec + ")");
                 StoragePaths.invalidate();
-                lastReady = true;
+                lastPriReady = afterPri;
+                lastSecReady = afterSec;
                 notifyReady();
             } else {
-                Log.w(TAG, "remount did not yield a usable /storage/sdcard1");
+                Log.w(TAG, "Remount did not yield a usable storage mount");
             }
         } finally {
             mountInFlight.set(false);
@@ -144,20 +176,34 @@ public final class ExternalSdMountMonitor {
     }
 
     /**
-     * Clear a wedged exFAT/FUSE stack then ask vold to mount and start fuse_sdcard1.
+     * Clear a wedged exFAT/FUSE stack then ask vold and kernel to mount sdcard0/sdcard1.
      * All commands run under {@code su} with a hard timeout so the UI cannot hang.
      */
     private boolean attemptRemount() {
-        // Kill stuck mount.exfat / zombie fuse before asking vold again.
-        runSuTimed(
-                "killall -9 mount.exfat 2>/dev/null; "
-                        + "stop fuse_sdcard1 2>/dev/null; "
-                        + "sleep 1; "
-                        + "vdc volume mount sdcard1; "
-                        + "start fuse_sdcard1; "
-                        + "sleep 2; "
-                        + "getprop init.svc.fuse_sdcard1");
-        return isSecondaryReady();
+        // 1. If primary is missing, try vdc mount and fallback block mount
+        if (!isPrimaryReady()) {
+            runSuTimed(
+                    "vdc volume mount sdcard0 2>/dev/null; "
+                            + "mkdir -p /storage/sdcard0 2>/dev/null; "
+                            + "mount -t exfat -o rw /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
+                            + "mount -t vfat -o rw /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
+                            + "mount -t exfat -o rw /dev/block/mmcblk1p1 /storage/sdcard0 2>/dev/null || "
+                            + "mount -t vfat -o rw /dev/block/mmcblk1p1 /storage/sdcard0 2>/dev/null");
+        }
+
+        // 2. If secondary is present and missing, remount fuse_sdcard1
+        if (hasSecondarySlot() && !isSecondaryReady()) {
+            runSuTimed(
+                    "killall -9 mount.exfat 2>/dev/null; "
+                            + "stop fuse_sdcard1 2>/dev/null; "
+                            + "sleep 1; "
+                            + "vdc volume mount sdcard1 2>/dev/null; "
+                            + "start fuse_sdcard1 2>/dev/null; "
+                            + "sleep 2; "
+                            + "getprop init.svc.fuse_sdcard1");
+        }
+
+        return isPrimaryReady() || isSecondaryReady();
     }
 
     private void notifyReady() {

@@ -1012,12 +1012,13 @@ public class SettingsMenuManager {
         row.setFocusable(true);
         row.setSoundEffectsEnabled(false);
         
-        GradientDrawable normalBg = main.createButtonBackground(ThemeManager.getListButtonNormalBg());
+        final GradientDrawable normalBg = main.createButtonBackground(ThemeManager.getListButtonNormalBg());
+        final GradientDrawable focusedBg = main.createButtonBackground(ThemeManager.getListButtonFocusedBg());
         row.setBackground(normalBg);
         
         row.setPadding(16, 12, 16, 12);
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rowLp.setMargins(0, 2, 0, 2);
         row.setLayoutParams(rowLp);
 
@@ -1043,11 +1044,11 @@ public class SettingsMenuManager {
                     if (main.currentSettingsDepth == 1) {
                         lastSubMenuFocusIndex = main.containerSettingsItems.indexOfChild(row);
                     }
-                    row.setBackground(main.createButtonBackground(ThemeManager.getListButtonFocusedBg()));
+                    row.setBackground(focusedBg);
                     tvLeft.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     tvRight.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                 } else {
-                    row.setBackground(main.createButtonBackground(ThemeManager.getListButtonNormalBg()));
+                    row.setBackground(normalBg);
                     tvLeft.setTextColor(ThemeManager.getTextColorPrimary());
                     tvRight.setTextColor(ThemeManager.getTextColorPrimary());
                 }
