@@ -368,5 +368,9 @@
     "Are you sure you want to log out from Last.fm?": "Last.fm 계정에서 로그아웃하시겠습니까?",
     "Logout": "로그아웃",
     "Logged out": "로그아웃되었습니다.",
-    "Not logged in": "로그인 안 됨"
+    "Not logged in": "로그인 안 됨",
+    "Checking...": "확인 중...",
+    "Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly.": "안내: OTA 업데이트는 Y1 기기 전용이며, Y2 기기에서는 정상적으로 지원되지 않을 수 있습니다.",
+    "Auto Media Scan": "음악 자동 스캔",
+    "Rescan Library": "라이브러리 다시 스캔"
 }

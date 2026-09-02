@@ -1,0 +1,535 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 86ddfb9..f7ce567 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -48,6 +48,7 @@
+             android:value="com.themoon.y1.CastOptionsProvider" />
+         <activity
+             android:name=".MainActivity"
++            android:launchMode="singleTask"
+             android:exported="true">
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+diff --git a/app/src/main/java/com/themoon/y1/MainActivity.java b/app/src/main/java/com/themoon/y1/MainActivity.java
+index 4e0afb6..fe47b33 100644
+--- a/app/src/main/java/com/themoon/y1/MainActivity.java
++++ b/app/src/main/java/com/themoon/y1/MainActivity.java
+@@ -120,6 +120,54 @@ public class MainActivity extends Activity {
+     private BluetoothProfile globalA2dp;
+     private BluetoothDevice targetDeviceForAudio = null; // 🚀 [추가] 좀비처럼 물고 늘어질 타겟 기기
+     private boolean isBtConnectingState = false;
++    // 🚀 [블루투스 connect/disconnect 무한 루프 방지] 같은 물리적 연결 이벤트에 대해
++    // ACTION_ACL_DISCONNECTED와 a2dp.profile.action.CONNECTION_STATE_CHANGED(DISCONNECTED)
++    // 브로드캐스트가 거의 동시에(수십ms 차이로) 각각 connectBluetoothAudio()를 호출하면, 이 기기
++    // (MT6572)의 블루투스 스택이 같은 기기에 대한 connect() 중복 호출을 "토글"로 오인해 즉시
++    // disconnect 시켜버립니다. 그 disconnect가 다시 두 브로드캐스트를 발생시켜 무한 루프가 됩니다.
++    // 같은 주소로 짧은 시간 안에 재호출되면 무시해서 이 경합을 막습니다.
++    private long lastConnectBluetoothAudioAttemptMs = 0;
++    private String lastConnectBluetoothAudioAddress = null;
++    // 🚀 [좀비 재연결 무한 루프 방지] 이어폰을 케이스에 넣는 등 "의도적으로" 기기가 꺼지거나
++    // 멀어져서 재연결이 계속 실패하는 경우에도, 예전 좀비 엔진은 영원히 재시도하며
++    // connect/disconnect 토스트를 끝없이 반복했습니다(그리고 이 기기의 블루투스 라디오를
++    // 계속 두드려서 시스템 전체가 먹통이 되는 원인이 되기도 합니다). 재연결 성공 시 0으로
++    // 리셋되고, 실패가 누적되면 일정 횟수 후 포기하고 좀비 타겟을 놓아줍니다.
++    private int btZombieRetryCount = 0;
++    private static final int MAX_BT_ZOMBIE_RETRIES = 3;
++    // 🚀 [포기 쿨다운] 좀비 엔진이 포기한 기기에 자동 재발견 스캔이 곧바로 다시 덤비지 못하게
++    // 막는 기록. attemptZombieReconnect()가 포기할 때 채우고, ACTION_FOUND 자동 연결에서 확인합니다.
++    private String lastZombieGiveUpAddress = null;
++    private long lastZombieGiveUpTimeMs = 0;
++    private static final long ZOMBIE_GIVEUP_COOLDOWN_MS = 60000;
++    // 🚀 [좀비 카운트 중복 방지] 같은 물리적 disconnect에 대해 ACL_DISCONNECTED와 A2DP
++    // CONNECTION_STATE_CHANGED가 둘 다 attemptZombieReconnect()를 부르는 것을 걸러내기 위한 기록.
++    private String lastZombieAttemptAddress = null;
++    private long lastZombieAttemptCountedMs = 0;
++
++    // 🚀 [백그라운드 자동 재연결 스캐너] 예전에는 사용자가 블루투스 화면을 직접 열어야만
++    // startDiscovery()가 돌아서 이미 페어링된 기기를 다시 찾아 연결할 수 있었습니다. 이 타이머는
++    // 화면이 무엇이든 상관없이(플레이어, 설정, 메인메뉴 등) 주기적으로 조용히(UI 터치 없이)
++    // 스캔을 돌려서, 페어링된 이어폰/스피커가 다시 범위 안에 들어오면 자동으로 물어줍니다.
++    // 이미 연결 중이거나(targetDeviceForAudio != null) 이미 스캔/연결 진행 중이면 절대 끼어들지
++    // 않습니다 — 살아있는 연결을 스캔이 끊어버리는 예전 버그를 다시 만들지 않기 위함입니다.
++    private static final long BT_BACKGROUND_SCAN_INTERVAL_MS = 15000;
++    private final Handler btBackgroundScanHandler = new Handler();
++    private final Runnable btBackgroundScanTask = new Runnable() {
++        @Override
++        public void run() {
++            try {
++                BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
++                if (ba != null && ba.isEnabled() && targetDeviceForAudio == null
++                        && !isBtConnectingState && !ba.isDiscovering()) {
++                    ba.startDiscovery();
++                }
++            } catch (Exception e) {
++            } finally {
++                btBackgroundScanHandler.postDelayed(this, BT_BACKGROUND_SCAN_INTERVAL_MS);
++            }
++        }
++    };
+ 
+     // 🚀 [추가] 스펙트럼/가사 모드 전용 하단 고정 프로그레스 바 변수
+     public LinearLayout layoutVisProgress;
+@@ -504,6 +552,15 @@ public class MainActivity extends Activity {
+ 
+     private android.media.RemoteControlClient remoteControlClient;
+     private ComponentName mediaButtonReceiver;
++    // 🚀 [차량 블루투스 AVRCP 안정화] RemoteControlClient가 AVRCP 메타데이터를 실어보내려면
++    // 실제로 재생 중일 때만 AudioFocus를 잡고 있어야 합니다. ExoPlayer의 자체 AudioFocus
++    // 관리(handleAudioFocus=true)는 이 기기(MT6572)의 블루투스/오디오 HAL에서 포커스 콜백이
++    // 불안정하게 반복 발생해 3초 재생/3초 무음이 반복되는 버그를 냈고, 반대로 앱 시작 시점에
++    // 한 번만 잡고 재생 여부와 무관하게 계속 붙들고 있으면(예전 시도) 아무것도 재생하지 않는데도
++    // 포커스를 쥐고 있어서 A2DP 연결 자체가 즉시 끊기는(connect→disconnect 반복) 버그가 났습니다.
++    // 그래서 updatePlayerUI()에서 실제 재생 상태(am.isPlaying())에 맞춰 매번 요청/포기하며,
++    // 콜백 내용은 전부 무시해(재생을 절대 멈추지 않음) 포커스 변경 때문에 끊기는 일도 없앱니다.
++    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {};
+ 
+     private boolean wasWifiOnBeforeSleep = false;
+     private int keyboardIndex = 0;
+@@ -1075,6 +1132,18 @@ public class MainActivity extends Activity {
+                 String displayName = (deviceName != null && !deviceName.trim().isEmpty()) ? deviceName
+                         : "Unknown (" + deviceAddress + ")";
+ 
++                // 🚀 [화면 무관 자동 재연결] 이미 페어링된 기기가 스캔(수동이든 백그라운드든)에
++                // 다시 잡혔는데 지금 지키고 있는 연결/타겟이 없다면, 목록에 얌전히 띄우고 사용자가
++                // 탭하길 기다리는 대신 바로 연결을 시도합니다. 예전엔 블루투스 화면을 직접 열고
++                // 목록에서 골라줘야만 다시 붙었습니다. (포기 쿨다운은 connectBluetoothAudio() 안에서
++                // respectGiveUpCooldown=true로 통일해서 처리합니다.)
++                BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
++                if (device.getBondState() == BluetoothDevice.BOND_BONDED
++                        && targetDeviceForAudio == null && !isBtConnectingState
++                        && ba != null && ba.isEnabled()) {
++                    connectBluetoothAudio(device, "ACTION_FOUND-auto", true);
++                }
++
+                 if (!foundBtDevices.contains(deviceAddress)) {
+                     foundBtDevices.add(deviceAddress);
+                     // 새로 발견된 기기는 무조건 목록에 추가!
+@@ -1091,18 +1160,34 @@ public class MainActivity extends Activity {
+                     BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+                     if (ba != null && ba.isEnabled() && targetDeviceForAudio != null && currentDevice != null
+                             && targetDeviceForAudio.getAddress().equals(currentDevice.getAddress())) {
+-                        connectBluetoothAudio(targetDeviceForAudio);
++                        attemptZombieReconnect(targetDeviceForAudio);
+                     }
+                 } else if (profileState == BluetoothProfile.STATE_CONNECTED) {
+                     ivStatusBluetooth.setColorFilter(0xFF00BFFF);
+                     String name = currentDevice != null ? currentDevice.getName() : "Unknown";
+                     Toast.makeText(context, t("Audio Connected to ") + name, Toast.LENGTH_SHORT).show();
++                    btZombieRetryCount = 0; // 🚀 재연결 성공했으니 실패 카운트 초기화!
++                    // 🚀 [좀비 엔진 사각지대 방어] 이 연결이 우리 connectBluetoothAudio()가 아니라
++                    // 차량/OS가 스스로 먼저 붙인 자동 연결이라면 targetDeviceForAudio가 여전히 null이라서
++                    // 다음번에 끊겼을 때 좀비 재연결이 아예 발동하지 않고 순정 스택의 느린 재시도에만
++                    // 의존하게 된다 (실제 로그에서 최초 연결이 4번 시도/16초 걸린 원인). 어떤 경로로
++                    // 붙었든 연결이 살아있는 동안은 지켜야 할 타겟으로 등록한다.
++                    if (targetDeviceForAudio == null && currentDevice != null) {
++                        targetDeviceForAudio = currentDevice;
++                    }
+                 }
+ 
+                 if (profileState == BluetoothProfile.STATE_CONNECTED
+                         || profileState == BluetoothProfile.STATE_DISCONNECTED) {
+                     isBtConnectingState = false; // 잠금 해제!
+-                    if (currentScreenState == STATE_BLUETOOTH) {
++                    // 🚀 [connect/disconnect 무한 루프 방지] 이 기기(MT6572)는 블루투스 무선이 하나뿐이라
++                    // A2DP 연결을 유지/재시도하는 도중에 새로 discovery 스캔을 돌리면 그 스캔 자체가
++                    // 방금 맺은(혹은 맺으려는) 연결을 끊어버립니다. 연결이 끊겨서 재연결을 시도 중인
++                    // 타겟 기기가 있을 때는 스캔을 재시작하지 않고, 재연결 대상이 없을 때만(순수 탐색
++                    // 목적) 목록을 새로고침합니다. STATE_CONNECTED 때는 애초에 재스캔할 이유가 없습니다.
++                    if (profileState == BluetoothProfile.STATE_DISCONNECTED
++                            && targetDeviceForAudio == null
++                            && currentScreenState == STATE_BLUETOOTH) {
+                         new Handler().postDelayed(new Runnable() {
+                             @Override
+                             public void run() {
+@@ -1135,7 +1220,7 @@ public class MainActivity extends Activity {
+                 if (state == BluetoothDevice.BOND_BONDED) {
+                     BluetoothDevice bondedDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                     if (bondedDevice != null)
+-                        connectBluetoothAudio(bondedDevice);
++                        connectBluetoothAudio(bondedDevice, "bond-confirmed", true);
+                 }
+             } else if (BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(action)) {
+                 BluetoothDevice disconnectedDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+@@ -1147,7 +1232,7 @@ public class MainActivity extends Activity {
+                     // 🚀 [무한 페어링 방어막 2] "이미 페어링이 완료된(BONDED)" 기기일 때만 좀비 엔진을 가동합니다!
+                     // 페어링 도중에 튕긴 거라면 재연결을 시도하지 않고 타겟을 깔끔하게 포기합니다.
+                     if (disconnectedDevice.getBondState() == BluetoothDevice.BOND_BONDED) {
+-                        connectBluetoothAudio(targetDeviceForAudio);
++                        attemptZombieReconnect(targetDeviceForAudio);
+                     } else {
+                         targetDeviceForAudio = null; // 찌꺼기 타겟 삭제
+                     }
+@@ -1185,10 +1270,93 @@ public class MainActivity extends Activity {
+         }
+     };
+ 
++    // 🚀 [좀비 재연결 무한 루프 방지] ACL_DISCONNECTED/A2DP DISCONNECTED 핸들러가 공통으로
++    // 호출하는 재연결 시도 관문입니다. 실패가 누적되면(이어폰이 케이스에 들어가서 꺼진 경우처럼
++    // 기기가 실제로 사라진 상황) 포기하고 타겟을 놓아줘서 끝없는 connect/disconnect 반복을 막습니다.
++    private void attemptZombieReconnect(BluetoothDevice device) {
++        // 🚀 [카운트 중복 방지] 물리적으로 한 번 끊겼을 뿐인데 ACTION_ACL_DISCONNECTED와 A2DP의
++        // CONNECTION_STATE_CHANGED(DISCONNECTED)가 둘 다 이 함수를 부릅니다. connectBluetoothAudio()의
++        // 1500ms 디바운스는 실제 connect() 중복 호출만 막을 뿐, 여기서 재시도 횟수가 두 번 깎이는 건
++        // 못 막습니다 — 그 결과 "3번 재시도"가 실제로는 실 연결 시도 1.5번 정도밖에 안 됐습니다
++        // (실제 차량 로그로 확인됨). 같은 기기에 대해 짧은 시간 안에 다시 불리면 카운트만 건너뜁니다.
++        long nowDedup = System.currentTimeMillis();
++        String addrDedup = device.getAddress();
++        if (addrDedup != null && addrDedup.equals(lastZombieAttemptAddress)
++                && (nowDedup - lastZombieAttemptCountedMs) < 1500) {
++            return;
++        }
++        lastZombieAttemptCountedMs = nowDedup;
++        lastZombieAttemptAddress = addrDedup;
++
++        btZombieRetryCount++;
++        android.util.Log.i("MainActivity", "attemptZombieReconnect: " + device.getAddress()
++                + " attempt=" + btZombieRetryCount + "/" + MAX_BT_ZOMBIE_RETRIES);
++        if (btZombieRetryCount > MAX_BT_ZOMBIE_RETRIES) {
++            // 🚀 [배터리 재발견 폭주 방어] 좀비 엔진이 포기한 직후에도 백그라운드 스캐너/ACTION_FOUND가
++            // targetDeviceForAudio==null을 보고 곧바로 다시 connectBluetoothAudio()를 불러버리면,
++            // "3번 시도 후 포기"가 사실상 무의미해지고 15초 간격으로 3번씩 영원히 재시도하는 꼴이 됩니다
++            // (실제 차량 로그에서 확인된 패턴). 포기한 기기 주소와 시각을 남겨서, 쿨다운이 끝나기 전까지는
++            // 발견 스캔이 이 기기에 자동으로 다시 덤비지 않도록 막습니다.
++            lastZombieGiveUpAddress = device.getAddress();
++            lastZombieGiveUpTimeMs = System.currentTimeMillis();
++            targetDeviceForAudio = null;
++            btZombieRetryCount = 0;
++            android.util.Log.i("MainActivity", "attemptZombieReconnect: giving up on " + device.getAddress()
++                    + " for " + (ZOMBIE_GIVEUP_COOLDOWN_MS / 1000) + "s");
++            Toast.makeText(this, t("Giving up reconnecting to ") + device.getName() + ".", Toast.LENGTH_SHORT).show();
++            return;
++        }
++        connectBluetoothAudio(device, "zombie-retry", false);
++    }
++
+     // 🚀 [순정 런처 완벽 이식] 중앙 통제형 블루투스 연결 엔진
+-    private void connectBluetoothAudio(final BluetoothDevice targetDevice) {
++    // 🚀 [호출부 명시] 스택 트레이스로 호출자를 추정하면 익명 클래스들이 하나의 synthetic
++    // accessor(access$NNNN)로 뭉개져서 실제로 어디서 불렀는지 구분이 안 됩니다(실제 로그로 확인됨).
++    // 그래서 각 호출부가 자기 이름을 직접 넘기도록 바꿨습니다. respectGiveUpCooldown은 "사람이 직접
++    // 누른 게 아니라 우리 코드가 알아서 재연결을 시도하는" 경로(발견 스캔, 본딩 재확인)에만 true로
++    // 줘서, 좀비 엔진이 방금 포기한 기기에 자동으로 또 덤비지 않게 막습니다. 사용자가 직접 탭했거나
++    // 좀비 엔진 자신의 재시도는 당연히 쿨다운을 무시해야 하므로 false.
++    private void connectBluetoothAudio(final BluetoothDevice targetDevice, String reason, boolean respectGiveUpCooldown) {
+         if (targetDevice == null)
+             return;
++
++        String address = targetDevice.getAddress();
++
++        // 🚀 [이미 연결된 기기에 재연결 시도 방지] 실제 차량 로그에서 확인된 버그: 사용자가
++        // 이미 연결되어 재생 중인 기기를 "Connect Audio"로 다시 탭하면(헷갈려서 또 누르는 경우가
++        // 흔함), 이 기기(MT6572)의 블루투스 스택은 이미 연결된 상대에 대한 두 번째 connect() 호출을
++        // "토글"로 해석해서 그 자리에서 바로 끊어버립니다 — 안정적으로 잘 붙어있던 연결이 사용자의
++        // 무해해 보이는 재탭 한 번으로 깨진 사례가 실제로 캡처되었습니다. 이미 연결된 기기라면
++        // connect()를 다시 부르지 않고 조용히 무시합니다.
++        try {
++            if (globalA2dp != null && globalA2dp.getConnectionState(targetDevice) == BluetoothProfile.STATE_CONNECTED) {
++                android.util.Log.i("MainActivity", "connectBluetoothAudio: " + address + " reason=" + reason
++                        + " already connected — ignoring redundant connect() to avoid toggle-disconnect");
++                return;
++            }
++        } catch (Exception ignored) {
++        }
++
++        if (respectGiveUpCooldown && address != null && address.equals(lastZombieGiveUpAddress)
++                && (System.currentTimeMillis() - lastZombieGiveUpTimeMs) < ZOMBIE_GIVEUP_COOLDOWN_MS) {
++            android.util.Log.i("MainActivity", "connectBluetoothAudio: skipped " + address
++                    + " reason=" + reason + " (still in give-up cooldown)");
++            return;
++        }
++
++        // 🚀 [connect/disconnect 무한 루프 방지] 같은 기기에 대해 짧은 시간 안에 다시 호출되면
++        // (ACL_DISCONNECTED와 A2DP CONNECTION_STATE_CHANGED가 같은 이벤트로 동시에 들어온 경우)
++        // 중복 connect() 경합을 막기 위해 무시합니다.
++        long now = System.currentTimeMillis();
++        if (address != null && address.equals(lastConnectBluetoothAudioAddress)
++                && (now - lastConnectBluetoothAudioAttemptMs) < 1500) {
++            return;
++        }
++        android.util.Log.i("MainActivity", "connectBluetoothAudio: " + address + " reason=" + reason
++                + " zombieCount=" + btZombieRetryCount);
++        lastConnectBluetoothAudioAttemptMs = now;
++        lastConnectBluetoothAudioAddress = address;
++
+         targetDeviceForAudio = targetDevice; // 1. 목표물 영구 고정!
+ 
+         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+@@ -1341,62 +1509,13 @@ public class MainActivity extends Activity {
+         }
+     }
+ 
+-    // 🚀 곡이 바뀔 때 호출!
+-    public void updateBluetoothMetadata(String title, String artist, String album,
+-            Bitmap albumArtBmp) {
+-        if (remoteControlClient == null)
+-            return;
+-
+-        android.media.RemoteControlClient.MetadataEditor editor = remoteControlClient.editMetadata(true);
+-
+-        // 1. 텍스트 정보 입력 (젤리빈은 MediaMetadataRetriever의 상수를 가져다 씁니다)
+-        editor.putString(MediaMetadataRetriever.METADATA_KEY_TITLE,
+-                title != null ? title : "Unknown Title");
+-        editor.putString(MediaMetadataRetriever.METADATA_KEY_ARTIST,
+-                artist != null ? artist : "Unknown Artist");
+-        editor.putString(MediaMetadataRetriever.METADATA_KEY_ALBUM,
+-                album != null ? album : "Unknown Album");
+-
+-        // 2. 🚀 [핵심] 앨범 아트 비트맵을 차량 디스플레이로 전송!
+-        if (albumArtBmp != null) {
+-            editor.putBitmap(android.media.RemoteControlClient.MetadataEditor.BITMAP_KEY_ARTWORK, albumArtBmp);
+-        }
+-
+-        // 포장 완료 후 시스템에 전송
+-        editor.apply();
+-    }
+-
+-    // 🚀 음악이 재생되거나 정지될 때 호출!
+-    public void updateBluetoothPlaybackState(boolean isPlaying) {
+-        if (remoteControlClient == null)
+-            return;
+-
+-        int state = isPlaying ? android.media.RemoteControlClient.PLAYSTATE_PLAYING
+-                : android.media.RemoteControlClient.PLAYSTATE_PAUSED;
+-
+-        // 젤리빈은 현재 시간(currentPosition)을 쏘지 않아도 차량에서 자체적으로 타이머를 돌려줍니다.
+-        remoteControlClient.setPlaybackState(state);
+-    }
+-
+-    // 🚀 [신규 도우미] 현재 화면의 곡 정보와 이미지를 읽어서 블루투스로 쏘는 함수
+-    private void sendBluetoothMetaToCar() {
+-        String title = tvPlayerTitle != null ? tvPlayerTitle.getText().toString() : "Unknown";
+-        String artist = tvPlayerArtist != null ? tvPlayerArtist.getText().toString() : "Unknown";
+-        Bitmap bmp = null;
+-
+-        // 앨범 아트가 있으면 블루투스 전송 용량에 맞게 살짝 압축해서 보냅니다.
+-        if (lastAlbumArtBytes != null && lastAlbumArtBytes.length > 0) {
+-            try {
+-                BitmapFactory.Options opts = new BitmapFactory.Options();
+-                opts.inSampleSize = 2;
+-                bmp = BitmapFactory.decodeByteArray(lastAlbumArtBytes, 0, lastAlbumArtBytes.length,
+-                        opts);
+-            } catch (Exception e) {
+-            }
+-        }
+-
+-        updateBluetoothMetadata(title, artist, "Y1 Player", bmp);
+-    }
++    // 🚀 [차량 AVRCP 메타데이터 송신 중단] 이 기기의 구형 블루투스 스택(Bluez 기반, mtkbt)은
++    // AVRCP 1.0으로 컴파일되어 있어 RemoteControlClient로 넣은 Now Playing 메타데이터/재생
++    // 상태를 차량에 전달할 방법이 없습니다(패스스루 재생/정지 명령만 지원). editMetadata()에
++    // 앨범 아트 비트맵까지 압축/인코딩해서 매번 Binder로 넘기는 작업은 절대 도착하지 않는
++    // 데이터에 매 재생 상태 변경마다 CPU/IPC 비용만 발생시키므로, 아예 전송을 중단합니다.
++    // RemoteControlClient 등록 자체(initRemoteControlClient)는 그대로 유지합니다 - 차량이
++    // 보내는 재생/정지/다음/이전 패스스루 명령을 계속 받으려면 필요합니다.
+     // =======================================================
+     // 🚀 [시스템 해킹 엔진 V2] 오류 탐지기가 장착된 시스템 강제 이식 엔진!
+     // =======================================================
+@@ -4200,12 +4319,14 @@ public class MainActivity extends Activity {
+             if (wm != null && wm.isWifiEnabled()) {
+                 wm.reconnect();
+             }
+-            BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+-            if (ba != null && ba.isEnabled()) {
+-                Set<BluetoothDevice> pairedDevices = ba.getBondedDevices();
+-            }
+         } catch (Exception e) {
+         }
++
++        // 🚀 [백그라운드 자동 재연결 스캐너 가동] 앱이 켜져 있는 동안은 어느 화면에 있든 상관없이
++        // 주기적으로 조용히 스캔을 돌려서, 페어링된 이어폰/스피커가 범위 안에 들어오면
++        // 사용자가 블루투스 화면을 열어 직접 탭하지 않아도 자동으로 연결합니다.
++        btBackgroundScanHandler.removeCallbacks(btBackgroundScanTask);
++        btBackgroundScanHandler.postDelayed(btBackgroundScanTask, 1000);
+     }
+ 
+     private void toggleWebServer() {
+@@ -5040,6 +5161,7 @@ public class MainActivity extends Activity {
+             } catch (Exception e) {
+             }
+         }
++        final boolean isConnectedFinal = isConnected;
+ 
+         String prefix = isConnected ? "((♪)) [CONNECTED] " : "✔ ";
+         final Button btnDevice = createListButton(prefix + name);
+@@ -5067,7 +5189,7 @@ public class MainActivity extends Activity {
+             @Override
+             public void onClick(View v) {
+                 clickFeedback();
+-                connectBluetoothAudio(device); // 🚀 중앙 엔진 호출!
++                connectBluetoothAudio(device, "user-tap", false); // 🚀 중앙 엔진 호출! 사용자가 직접 눌렀으니 쿨다운 무시.
+             }
+         });
+ 
+@@ -5094,14 +5216,23 @@ public class MainActivity extends Activity {
+             @Override
+             public void onClick(View v) {
+                 clickFeedback();
+-                if (btnConnect.getVisibility() == View.GONE) {
+-                    btnConnect.setVisibility(View.VISIBLE);
++                if (btnConnect.getVisibility() == View.GONE && btnUnpair.getVisibility() == View.GONE) {
++                    // 🚀 [오탭 방지] 이미 연결된 기기라면 "Connect Audio"를 아예 보여주지 않습니다.
++                    // 실제 차량 테스트에서, 이미 연결된 상태인데도 이 버튼이 그대로 보여서 사용자가
++                    // 다시 눌렀고, 그 결과 이 기기(MT6572)의 스택이 이미 연결된 상대에 대한 재연결
++                    // 요청을 "끊기" 토글로 해석해 멀쩡하던 연결이 끊겼습니다. 목록 상단의
++                    // "[CONNECTED]" 표시만으로는 눈에 잘 안 띄어서 생긴 문제이므로, 서브 메뉴에서도
++                    // 헷갈릴 만한 버튼 자체를 없앱니다.
++                    if (!isConnectedFinal) {
++                        btnConnect.setVisibility(View.VISIBLE);
++                    }
+                     btnUnpair.setVisibility(View.VISIBLE);
+ 
+                     // 💡 서브 메뉴가 열리자마자 휠 커서가 'Connect Audio' 버튼으로 자연스럽게 빨려 들어가도록 유도합니다!
+-                    btnConnect.post(new Runnable() {
++                    final View focusTarget = isConnectedFinal ? btnUnpair : btnConnect;
++                    focusTarget.post(new Runnable() {
+                         public void run() {
+-                            btnConnect.requestFocus();
++                            focusTarget.requestFocus();
+                         }
+                     });
+                 } else {
+@@ -5128,7 +5259,7 @@ public class MainActivity extends Activity {
+             @Override
+             public void onClick(View v) {
+                 clickFeedback();
+-                connectBluetoothAudio(device); // 🚀 페어링 안 된 상태여도 중앙 엔진이 알아서 페어링부터 꽂아줍니다!
++                connectBluetoothAudio(device, "user-tap", false); // 🚀 페어링 안 된 상태여도 중앙 엔진이 알아서 페어링부터 꽂아줍니다! 사용자 직접 탭이므로 쿨다운 무시.
+             }
+         });
+ 
+@@ -10756,10 +10887,19 @@ public class MainActivity extends Activity {
+ 
+             updateGlobalStatusPlayIcon();
+             updatePlayerStatusIndicators(); // 💡 에러가 났던 그 함수! (이제 정상 작동합니다)
+-            // 🚀 [차량 블루투스 연동] 곡 정보와 재생/정지 상태를 실시간으로 차량에 쏴줍니다!
+-            sendBluetoothMetaToCar();
+-            updateBluetoothPlaybackState(am.isPlaying());
+-
++            // 🚀 [차량 블루투스 AVRCP 수리] 실제로 재생 중일 때만 AudioFocus를 잡아야
++            // RemoteControlClient가 "활성 미디어"로 인정받아 곡 정보가 차량에 전달됩니다.
++            // 재생 중이 아닐 때도 계속 잡고 있으면(예: 그냥 블루투스 화면만 켜놓은 상태) 이 기기의
++            // A2DP 오디오 경로가 즉시 connect→disconnect를 반복하는 버그가 나므로, 반드시
++            // 실제 재생 여부에 맞춰 매번 요청/포기합니다.
++            if (audioManager != null) {
++                if (am.isPlaying()) {
++                    audioManager.requestAudioFocus(audioFocusChangeListener, AudioManager.STREAM_MUSIC,
++                            AudioManager.AUDIOFOCUS_GAIN);
++                } else {
++                    audioManager.abandonAudioFocus(audioFocusChangeListener);
++                }
++            }
+             // 🚀 [버그 완벽 픽스!] 하단 재생(Play) 버튼 아이콘 동기화!
+             // 음악이 재생 중일 때는 '일시정지(pause)' 아이콘으로, 멈췄을 때는 '재생(play)' 아이콘으로 갈아끼웁니다.
+             if (ivMenuPreview != null && btnNowPlaying != null && !btnNowPlaying.hasFocus()) {
+@@ -11912,7 +12052,17 @@ public class MainActivity extends Activity {
+                 if (isMediaLongPressConsumed) {
+                     isMediaLongPressConsumed = false;
+                 } else {
+-                    com.themoon.y1.managers.AudioPlayerManager.getInstance().playOrPauseMusic();
++                    // 🚀 [차량 AVRCP 오작동 방어] 이 device는 차량이 보낸 AVRCP PLAY/PAUSE passthrough
++                    // 명령도 물리 하단 버튼과 똑같이 dispatchKeyEvent()로 흘러들어온다 (MediaBtnReceiver의
++                    // ACTION_MEDIA_BUTTON 브로드캐스트 경로와는 별개). 재생 시작 직후 차량이 스스로 보낸
++                    // PLAY/PAUSE 토글이 여기서 무방비로 처리되면서 재생-정지 반복 버그의 실제 원인이었다.
++                    // MediaBtnReceiver와 동일한 4초 유예 가드를 여기에도 적용한다.
++                    com.themoon.y1.managers.AudioPlayerManager am = com.themoon.y1.managers.AudioPlayerManager.getInstance();
++                    boolean isSuspiciousAutoStop = am.isPlaying()
++                            && (System.currentTimeMillis() - am.getLastPlaybackStartTimeMs()) < 4000;
++                    if (!isSuspiciousAutoStop) {
++                        am.playOrPauseMusic();
++                    }
+                 }
+                 return true;
+             }
+@@ -12259,6 +12409,7 @@ public class MainActivity extends Activity {
+         clockHandler.removeCallbacks(clockTask);
+         progressHandler.removeCallbacks(updateProgressTask);
+         volumeHandler.removeCallbacks(hideVolumeTask);
++        btBackgroundScanHandler.removeCallbacks(btBackgroundScanTask);
+ 
+         // 🚀 [웹 서버 자물쇠 해제] 앱이 종료될 때 시스템 잠금 좀비 버그가 걸리지 않도록 확실하게 풀어줍니다.
+         try {
+@@ -12614,8 +12765,17 @@ public class MainActivity extends Activity {
+                 // ⏯ 재생/일시정지 버튼
+                 else if (keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || keyCode == 85 || keyCode == 86) {
+                     if (MainActivity.instance.activePlayer != 1) {
+-                        com.themoon.y1.managers.AudioPlayerManager.getInstance().playOrPauseMusic();
+-                        MainActivity.instance.clickFeedback();
++                        com.themoon.y1.managers.AudioPlayerManager am = com.themoon.y1.managers.AudioPlayerManager.getInstance();
++                        // 🚀 [차량 AVRCP 오작동 방어] 곡 정보(메타데이터)를 못 받은 일부 차량 헤드유닛이
++                        // 재생 시작 직후 스스로 PLAY_PAUSE 명령을 한 번 더 보내 정지시켜버리는 경우가
++                        // 있습니다. 재생이 막 시작된 지 얼마 안 된 시점에 "정지" 방향으로 들어온 토글은
++                        // 사용자가 실제로 누른 것이 아닐 가능성이 높으므로 무시합니다.
++                        boolean isSuspiciousAutoStop = am.isPlaying()
++                                && (System.currentTimeMillis() - am.getLastPlaybackStartTimeMs()) < 4000;
++                        if (!isSuspiciousAutoStop) {
++                            am.playOrPauseMusic();
++                            MainActivity.instance.clickFeedback();
++                        }
+                     }
+                 }
+                 // 🔊 휠 조작 볼륨 방어
+@@ -12684,8 +12844,6 @@ public class MainActivity extends Activity {
+             lastAlbumArtBytes = bytes;
+             updateMainMenuBackground();
+             refreshNowPlayingPreview();
+-            // 🚀 앨범 아트가 새로 로딩되었으니 차량 화면에도 새로 쏴줍니다!
+-            sendBluetoothMetaToCar();
+ 
+         } catch (Exception e) {
+         }
+diff --git a/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java b/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
+index fa98531..33d512d 100644
+--- a/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
++++ b/app/src/main/java/com/themoon/y1/managers/AudioPlayerManager.java
+@@ -38,7 +38,16 @@ public class AudioPlayerManager {
+     public Y1CrossfeedAudioProcessor crossfeedProcessor = new Y1CrossfeedAudioProcessor();
+ 
+     private float currentSpeed = 1.0f;
+-    
++    // 🚀 [차량 AVRCP 오작동 방어] 이 기기의 구형 블루투스 스택은 RemoteControlClient로
++    // Now Playing 메타데이터를 넣어도 차량에 전달하지 못하는 것으로 보이는데(재생/정지
++    // 패스스루 명령만 지원, 메타데이터 속성 응답은 미구현 추정), 일부 차량 헤드유닛은 곡 정보를
++    // 못 받으면 재생 시작 직후 스스로 PLAY_PAUSE를 한 번 더 보내 "정지시켜" 버립니다.
++    // 마지막으로 재생이 시작된 시각을 기록해서, MediaBtnReceiver가 그 직후 짧은 유예 시간 안에
++    // 들어온 정지 방향 토글을 사용자 입력이 아닌 것으로 간주하고 걸러낼 수 있게 합니다.
++    private boolean lastPlayWhenReadyForGrace = false;
++    private long lastPlaybackStartTimeMs = 0;
++    public long getLastPlaybackStartTimeMs() { return lastPlaybackStartTimeMs; }
++
+     // 🚀 [취침 예약 타이머]
+     private Handler sleepTimerHandler = new Handler(android.os.Looper.getMainLooper());
+     private Runnable sleepTimerRunnable = new Runnable() {
+@@ -157,7 +166,19 @@ public class AudioPlayerManager {
+             exoPlayer = new com.google.android.exoplayer2.SimpleExoPlayer.Builder(context.getApplicationContext(), renderersFactory)
+                     .setLoadControl(loadControl) // 💥 뼈대를 세운 후 물탱크 장착!
+                     .build();
+-                    
++
++            // 🚀 [차량 블루투스 AVRCP 수리 - 끊김 버그로 롤백] AudioFocus 자체는 MainActivity의
++            // initRemoteControlClient()에서 딱 한 번만 수동으로 잡습니다(RemoteControlClient가
++            // AVRCP 메타데이터를 실어보내려면 포커스 보유가 필요하기 때문). 여기서 ExoPlayer에게
++            // handleAudioFocus=true로 포커스 관리까지 맡겼더니, 이 기기(MT6572)의 블루투스 오디오
++            // 경로에서 포커스 콜백이 불안정하게 반복 발생해 3초 재생/3초 무음이 반복되는 심각한
++            // 끊김이 생겼습니다. AudioAttributes(스트림 종류)만 지정하고 포커스 관리는 끕니다.
++            com.google.android.exoplayer2.audio.AudioAttributes audioAttrs = new com.google.android.exoplayer2.audio.AudioAttributes.Builder()
++                    .setUsage(com.google.android.exoplayer2.C.USAGE_MEDIA)
++                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
++                    .build();
++            exoPlayer.setAudioAttributes(audioAttrs, /* handleAudioFocus= */ false);
++
+             // 🚀 [스마트 배터리 엔진 가동 - 96kHz 끊김 버그 완벽 수리!]
+             // 💥 [핵심 수리] 음원 스펙에 관계없이 ExoPlayer에 WakeLock 관리를 완전히 위임합니다.
+             // onPlayerStateChanged에서 format을 검사할 때는 format이 아직 null일 수 있어서 
+@@ -171,6 +192,12 @@ public class AudioPlayerManager {
+                 public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
+                     // CPU 부스트 관련 로직 제거됨
+ 
++                    // 🚀 [차량 AVRCP 오작동 방어] 재생이 "막 시작된" 순간을 기록해둡니다.
++                    if (playWhenReady && !lastPlayWhenReadyForGrace) {
++                        lastPlaybackStartTimeMs = System.currentTimeMillis();
++                    }
++                    lastPlayWhenReadyForGrace = playWhenReady;
++
+                     if (playbackState == Player.STATE_READY) {
+                         if (MainActivity.instance != null) {
+                             MainActivity.instance.runOnUiThread(new Runnable() {

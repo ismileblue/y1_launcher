@@ -362,5 +362,9 @@
     "Are you sure you want to log out from Last.fm?": "确定要退出Last.fm账号吗？",
     "Logout": "退出登录",
     "Logged out": "已退出登录",
-    "Not logged in": "未登录"
+    "Not logged in": "未登录",
+    "Checking...": "正在检查...",
+    "Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly.": "提示：OTA在线更新仅支持Y1机型，Y2机型可能无法正常支持OTA更新。",
+    "Auto Media Scan": "自动扫描音乐",
+    "Rescan Library": "重新扫描曲库"
 }

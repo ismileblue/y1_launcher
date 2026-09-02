@@ -469,7 +469,6 @@ public class MainActivity extends Activity {
     private ListView listVirtualSongs;
     private View scrollViewBrowser;
     public boolean isScreenOffControlEnabled = false;
-    public boolean isAutoScanEnabled = true; // 🚀 [추가] 음악 자동 스캔 스위치 기본값
     public boolean isAutoFetchEnabled = true; // 🚀 [추가] 인터넷 자동 검색 스위치 기본값
     public static List<SongItem> customLibrary = new ArrayList<>();
     public static List<SongItem> audiobookLibrary = new ArrayList<>(); // 🚀 오디오북 전용 바구니 신설!
@@ -633,8 +632,8 @@ public class MainActivity extends Activity {
                 tvFocusPreviewClock.setText(sdf.format(new Date()));
             }
 
-            // 🚀 [최적화] 메인 메뉴 화면일 때 실시간 위젯 갱신 (시계, 배터리, 앨범 등)
-            if (currentScreenState == STATE_MENU) {
+            // 🚀 [최적화] 메인 메뉴 화면이고 위젯이 켜져 있을 때만 위젯 갱신을 실행하여 불필요한 1초 주기 CPU 부하 제거!
+            if (currentScreenState == STATE_MENU && (isWidgetClockOn || isWidgetBatteryOn || isWidgetAlbumOn)) {
                 refreshWidgets();
             }
             clockHandler.postDelayed(this, 1000);
@@ -1258,12 +1257,11 @@ public class MainActivity extends Activity {
                 isMediaScanning = true;
             } else if (Intent.ACTION_MEDIA_SCANNER_FINISHED.equals(action)) {
                 isMediaScanning = false;
-                reloadThemesIfStorageReady();
 
                 // 🚀 [USB 오토 스캔 부활 엔진!]
                 // 시스템이 USB(SD카드) 인식을 끝냈다고 알려주면,
-                // 설정에서 자동 스캔이 켜져있을 때만 백그라운드 스캔을 실행합니다!
-                if (isAutoScanEnabled && !isCustomScanning) {
+                // 즉시 우리의 초고속 부분 스캐너를 돌려서 새 곡을 캐시 메모장에 영구 저장합니다!
+                if (!isCustomScanning) {
                     startMediaLibraryScan();
                 }
             }
@@ -1516,9 +1514,6 @@ public class MainActivity extends Activity {
 
             int foundCount = 0; // 발견된 파일 개수 카운터
 
-            File appNativeLibsDir = new File(getFilesDir(), "native_libs");
-            if (!appNativeLibsDir.exists()) appNativeLibsDir.mkdirs();
-
             for (String lib : targetLibs) {
                 java.io.InputStream is = null;
                 try {
@@ -1531,25 +1526,19 @@ public class MainActivity extends Activity {
                 foundCount++;
 
                 java.io.File tempFile = new java.io.File(getCacheDir(), lib);
-                java.io.File localAppLib = new java.io.File(appNativeLibsDir, lib);
                 java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile);
-                java.io.FileOutputStream fosApp = new java.io.FileOutputStream(localAppLib);
                 byte[] buffer = new byte[4096];
                 int len;
                 while ((len = is.read(buffer)) != -1) {
                     fos.write(buffer, 0, len);
-                    fosApp.write(buffer, 0, len);
                 }
                 fos.flush();
                 fos.close();
-                fosApp.flush();
-                fosApp.close();
                 is.close();
 
                 String tempPath = tempFile.getAbsolutePath();
                 commandBuilder.append("cat ").append(tempPath).append(" > /system/lib/").append(lib).append(" && ");
-                commandBuilder.append("chmod 755 /system/lib/").append(lib).append(" && ");
-                commandBuilder.append("chcon u:object_r:system_file:s0 /system/lib/").append(lib).append(" 2>/dev/null && ");
+                commandBuilder.append("chmod 644 /system/lib/").append(lib).append(" && ");
             }
 
             // 만약 파일을 단 1개도 못 찾았다면 여기서 멈춤!
@@ -1762,20 +1751,9 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
         try {
-            // 저장된 테마 이름/폴더명/인덱스를 불러옵니다.
-            String savedThemeName = prefs.getString("app_theme_name", null);
-            String savedThemeFolder = prefs.getString("app_theme_folder", null);
+            // 저장된 인덱스 번호를 불러옵니다. (파일이 지워졌을 수도 있으니 안전하게 처리됨)
             int savedThemeIndex = prefs.getInt("app_theme_index", 0);
-            boolean matched = false;
-            if (savedThemeName != null) {
-                matched = ThemeManager.setThemeByName(savedThemeName);
-            }
-            if (!matched && savedThemeFolder != null) {
-                matched = ThemeManager.setThemeByName(savedThemeFolder);
-            }
-            if (!matched) {
-                ThemeManager.setThemeIndex(savedThemeIndex);
-            }
+            ThemeManager.setThemeIndex(savedThemeIndex);
         } catch (Exception e) {
         }
 
@@ -1837,10 +1815,6 @@ public class MainActivity extends Activity {
         }
 
         try {
-            isAutoScanEnabled = prefs.getBoolean("auto_media_scan", true);
-        } catch (Exception e) {
-        }
-        try {
             isAutoFetchEnabled = prefs.getBoolean("auto_fetch", true);
         } catch (Exception e) {
         } // 🚀 [추가]
@@ -1898,11 +1872,10 @@ public class MainActivity extends Activity {
         externalSdMountMonitor.setListener(new com.themoon.y1.managers.ExternalSdMountMonitor.Listener() {
             @Override
             public void onSecondaryStorageReady() {
-                reloadThemesIfStorageReady();
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (isAutoScanEnabled && !isCustomScanning)
+                        if (!isCustomScanning)
                             startMediaLibraryScan();
                     }
                 });
@@ -2541,14 +2514,6 @@ public class MainActivity extends Activity {
             btnNowPlaying.requestFocus();
         }
 
-        // 🚀 [부팅 저장소 지연 안전망] 부팅 직후 SD카드/플래시 마운트가 지연되었을 경우 1.5초 후 테마 재동기화
-        new Handler().postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                reloadThemesIfStorageReady();
-            }
-        }, 1500);
-
         // =========================================================
         // 🚀 [셔플/반복/배속/취침/전원종료 수직 리스트 팝업 오버레이 조립 엔진]
         // =========================================================
@@ -3161,7 +3126,7 @@ public class MainActivity extends Activity {
     }
 
     // 3. 중앙 스캔 엔진 (초고속 부분 스캔 / 양방향 동기화 적용!)
-    public void startMediaLibraryScan() {
+    private void startMediaLibraryScan() {
         if (isCustomScanning)
             return;
         isCustomScanning = true;
@@ -4458,18 +4423,12 @@ public class MainActivity extends Activity {
                     clickFeedback();
                     ThemeManager.setThemeIndex(index);
                     try {
-                        ThemeManager.ThemeData selectedTheme = ThemeManager.availableThemes.get(index);
                         SharedPreferences.Editor editor = prefs.edit();
                         editor.putInt("app_theme_index", index);
-                        editor.putString("app_theme_name", selectedTheme.name);
-                        if (selectedTheme.folderPath != null && !selectedTheme.folderPath.equals("default")) {
-                            editor.putString("app_theme_folder", new File(selectedTheme.folderPath).getName());
-                        } else {
-                            editor.putString("app_theme_folder", "default");
-                        }
                         editor.putBoolean("reboot_to_theme", true);
 
                         // 🚀 [지능형 룰 1] 새로 선택한 테마에 고유 배경화면이 있는지 3중으로 검사합니다.
+                        ThemeManager.ThemeData selectedTheme = ThemeManager.availableThemes.get(index);
                         boolean hasThemeBg = false;
 
                         // 1. config.json 에 bg_image 가 선언되어 있고, 실제 파일이 존재하는지?
@@ -4579,10 +4538,9 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
             }
 
-            // 🎯 [신규 엔진 장착] PC에서 파일 업로드가 끝난 후 서버를 끄면, 자동 스캔이 켜져있을 때 즉시 백그라운드 스캔 실행
-            if (isAutoScanEnabled && !isCustomScanning) {
-                startMediaLibraryScan();
-            }
+            // 🎯 [신규 엔진 장착] PC에서 파일 업로드가 끝난 후 서버를 끄면, 즉시 백그라운드에서 자동 스캔을 돌려 새로 들어온 곡을 '최근
+            // 추가된 곡' 1등으로 올립니다!
+            startMediaLibraryScan();
 
         } else {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
@@ -5062,16 +5020,16 @@ public class MainActivity extends Activity {
                     t("Free Space") + " :  " + formatStorageSize(free));
             tvStorageDetails.setGravity(Gravity.CENTER);
 
-            // 🚀 글자 크기 기존 크기(18f) 유지 및 줄 간격 최적화
-            tvStorageDetails.setTextSize(18f);
-            tvStorageDetails.setLineSpacing(6f, 0.85f);
+            // 🚀 글자 크기 및 줄 간격 최적화 (화면 밖 짤림 완전 방지)
+            tvStorageDetails.setTextSize(16f);
+            tvStorageDetails.setLineSpacing(6f, 0.9f);
             tvStorageDetails.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
 
             tvStorageDetails.setVisibility(View.VISIBLE);
 
         } catch (Exception e) {
             tvStorageDetails.setText(t("Storage Error: Failed to calculate space."));
-            tvStorageDetails.setTextSize(18f);
+            tvStorageDetails.setTextSize(16f);
             tvStorageDetails.setVisibility(View.VISIBLE);
         }
     }
@@ -6620,25 +6578,16 @@ public class MainActivity extends Activity {
         containerSettingsItems.addView(rowCurrent);
 
         // 3. 서버 버전 표시 줄 (처음엔 Checking... 으로 표시)
-        final LinearLayout rowServer = createSettingRow("Latest Version", t("Checking..."));
+        final LinearLayout rowServer = createSettingRow("Latest Version", "Checking...");
         containerSettingsItems.addView(rowServer);
 
         createCategoryHeader("━━━━━━━━━━━━━━");
 
         // 4. 하단 업데이트 실행 버튼 (서버 확인 전까지는 숨겨둡니다)
         final Button btnExecuteUpdate = createListButton("🚀 " + t("DOWNLOAD & UPDATE"));
+        ;
         btnExecuteUpdate.setVisibility(View.GONE);
         containerSettingsItems.addView(btnExecuteUpdate);
-
-        // 5. Y1 전용 OTA 업데이트 및 Y2 지원 제한 안내문 (다국어 지원)
-        TextView tvNotice = new TextView(this);
-        tvNotice.setTypeface(ThemeManager.getCustomFont(), Typeface.NORMAL);
-        tvNotice.setText(t("Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly."));
-        tvNotice.setTextColor(ThemeManager.getTextColorSecondary());
-        tvNotice.setTextSize(13);
-        tvNotice.setPadding(20, 16, 20, 16);
-        tvNotice.setLineSpacing(4f, 1.15f);
-        containerSettingsItems.addView(tvNotice);
 
         // 🚀 5. 화면이 열리자마자 백그라운드에서 서버의 output-metadata.json을 읽어옵니다!
         new Thread(new Runnable() {
@@ -11328,18 +11277,15 @@ public class MainActivity extends Activity {
                 }
             }
 
-            // 🚀 [실시간 동기화] 메인 화면에 머무르고 있을 때 백그라운드에서 곡이 바뀌면 메인 메뉴 위젯 및 프리뷰도 실시간 리프레시!
-            if (currentScreenState == STATE_MENU) {
+            // 🚀 [실시간 동기화] 메인 화면에서 나우 플레잉을 주시하고 있을 때 백그라운드에서 곡이 바뀌면 프리뷰 이미지도 실시간 리프레시!
+            if (currentScreenState == STATE_MENU && ivWidgetFocusImage != null && tvFocusPreviewClock != null
+                    && tvFocusPreviewClock.getVisibility() == View.VISIBLE) {
                 for (ThemeManager.MenuElement el : ThemeManager.getCurrentTheme().menuElements) {
                     if ("OPEN_PLAYER".equals(el.action)) {
-                        View btn = findViewById(10000 + ThemeManager.getCurrentTheme().menuElements.indexOf(el));
-                        if (btn != null && btn.hasFocus()) {
-                            updateFocusPreviewLiveContent(el);
-                        }
+                        updateFocusPreviewLiveContent(el);
                         break;
                     }
                 }
-                refreshWidgets();
             }
         } catch (Exception e) {
         }
@@ -13657,47 +13603,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // 🚀 [부팅/마운트 시 테마 안전 복구 엔진]
-    public void reloadThemesIfStorageReady() {
-        try {
-            if (prefs == null) prefs = getSharedPreferences("Y1_SETTINGS", MODE_PRIVATE);
-            String savedThemeName = prefs.getString("app_theme_name", null);
-            String savedThemeFolder = prefs.getString("app_theme_folder", null);
-            int savedThemeIndex = prefs.getInt("app_theme_index", 0);
-
-            File themeFolder = StoragePaths.getThemesDir();
-            int prevCount = ThemeManager.availableThemes.size();
-            ThemeManager.loadThemesFromStorage(themeFolder);
-            int newCount = ThemeManager.availableThemes.size();
-
-            boolean matched = false;
-            if (savedThemeName != null) {
-                matched = ThemeManager.setThemeByName(savedThemeName);
-            }
-            if (!matched && savedThemeFolder != null) {
-                matched = ThemeManager.setThemeByName(savedThemeFolder);
-            }
-            if (!matched) {
-                ThemeManager.setThemeIndex(savedThemeIndex);
-            }
-
-            if (newCount > prevCount || (savedThemeName != null && matched)) {
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        applyThemeToMainMenu();
-                        applyThemeToPlayerUI();
-                        if (currentScreenState == STATE_SETTINGS && currentSettingsDepth == 1) {
-                            buildThemeSelectorUI();
-                        }
-                    }
-                });
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
     // 고급 EQ 메인 서브 페이지 빌더
     public void buildEqualizerSettingsUI() {
         currentSettingsDepth = 2;
@@ -15343,9 +15248,6 @@ public class MainActivity extends Activity {
 
                 // 👉 매칭 성공! 사용자가 원하는 위치(JSON에 적어둔 x, y)에서 진짜 위젯의 전원을 켜줍니다!
                 widgetView.setVisibility(View.VISIBLE);
-                if (el.type.equals("widget_clock") || el.type.equals("widget_analog_clock")) {
-                    widgetView.bringToFront(); // 🚀 시계 위젯이 앨범 위에 항상 올라오도록 Z-order 보장!
-                }
                 hasLiveWidgetActivated = true;
 
                 // 특별히 앨범 정보 위젯의 경우, 진짜 나우플레잉 연동 데이터를 실시간 주입 새로고침해 줍니다.
@@ -15427,7 +15329,6 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        refreshWidgets(); // 🚀 포커스 전환 즉시 위젯 텍스트와 시간 렌더링!
     }
 
     // 💡 [지능형 버그 수리 완결] 상단 헤더를 제거하고, 중간 메뉴 제어 시 포커스 락을 완벽하게 유지하는 에디터 서브 메뉴

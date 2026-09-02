@@ -362,5 +362,9 @@
     "Are you sure you want to log out from Last.fm?": "Last.fmアカウントからログアウトしますか？",
     "Logout": "ログアウト",
     "Logged out": "ログアウトしました",
-    "Not logged in": "未ログイン"
+    "Not logged in": "未ログイン",
+    "Checking...": "確認中...",
+    "Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly.": "注意: OTAアップデートはY1モデルのみ対応しており、Y2モデルでは正常に動作しない場合があります。",
+    "Auto Media Scan": "音楽自動スキャン",
+    "Rescan Library": "ライブラリ再スキャン"
 }

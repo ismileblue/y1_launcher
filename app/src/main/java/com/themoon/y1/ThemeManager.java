@@ -175,6 +175,12 @@ public class ThemeManager {
 // 🚀 [신규 엔진 가동!] 테마를 읽어오기 전에, 폴더 안에 굴러다니는 '.zip' 파일이 있는지 먼저 싹 훑어봅니다!
         File[] allFiles = themeFolder.listFiles();
         if (allFiles != null) {
+            java.util.Arrays.sort(allFiles, new java.util.Comparator<File>() {
+                @Override
+                public int compare(File f1, File f2) {
+                    return f1.getName().compareToIgnoreCase(f2.getName());
+                }
+            });
             for (File file : allFiles) {
                 if (file.isFile() && file.getName().toLowerCase().endsWith(".zip")) {
                     try {
@@ -218,6 +224,12 @@ public class ThemeManager {
         }
         File[] folders = themeFolder.listFiles();
         if (folders != null) {
+            java.util.Arrays.sort(folders, new java.util.Comparator<File>() {
+                @Override
+                public int compare(File f1, File f2) {
+                    return f1.getName().compareToIgnoreCase(f2.getName());
+                }
+            });
             for (File subFolder : folders) {
                 if (subFolder.isDirectory()) {
                     File configFile = new File(subFolder, "config.json");
@@ -346,6 +358,28 @@ public class ThemeManager {
                 }
             }
         }
+    }
+
+    public static boolean setThemeByName(String themeNameOrFolder) {
+        if (themeNameOrFolder == null || themeNameOrFolder.trim().isEmpty()) {
+            return false;
+        }
+        String target = themeNameOrFolder.trim();
+        for (int i = 0; i < availableThemes.size(); i++) {
+            ThemeData theme = availableThemes.get(i);
+            if (theme.name != null && theme.name.equalsIgnoreCase(target)) {
+                currentThemeIndex = i;
+                return true;
+            }
+            if (theme.folderPath != null) {
+                File f = new File(theme.folderPath);
+                if (f.getName().equalsIgnoreCase(target)) {
+                    currentThemeIndex = i;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static void setThemeIndex(int index) { if (index >= 0 && index < availableThemes.size()) currentThemeIndex = index; else currentThemeIndex = 0; }

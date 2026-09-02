@@ -362,5 +362,9 @@
     "Are you sure you want to log out from Last.fm?": "¿Seguro que desea cerrar sesión en Last.fm?",
     "Logout": "Cerrar sesión",
     "Logged out": "Sesión cerrada",
-    "Not logged in": "No conectado"
+    "Not logged in": "No conectado",
+    "Checking...": "Comprobando...",
+    "Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly.": "Aviso: Las actualizaciones OTA solo son compatibles con los modelos Y1 y es posible que no funcionen correctamente en los modelos Y2.",
+    "Auto Media Scan": "Escaneo automático de música",
+    "Rescan Library": "Reescanear biblioteca"
 }

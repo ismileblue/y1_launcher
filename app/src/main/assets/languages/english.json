@@ -362,5 +362,9 @@
     "Are you sure you want to log out from Last.fm?": "Are you sure you want to log out from Last.fm?",
     "Logout": "Logout",
     "Logged out": "Logged out",
-    "Not logged in": "Not logged in"
+    "Not logged in": "Not logged in",
+    "Checking...": "Checking...",
+    "Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly.": "Notice: OTA updates are supported on Y1 models only. Y2 models may not support OTA updates properly.",
+    "Auto Media Scan": "Auto Media Scan",
+    "Rescan Library": "Rescan Library"
 }

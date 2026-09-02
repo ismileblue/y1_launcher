@@ -44,6 +44,7 @@ public final class ExternalSdMountMonitor {
     private final AtomicBoolean mountInFlight = new AtomicBoolean(false);
     private Listener listener;
     private BroadcastReceiver mediaReceiver;
+    private BroadcastReceiver usbReceiver;
     private long lastMountAttemptMs;
     private boolean lastPriReady = false;
     private boolean lastSecReady = false;
@@ -79,6 +80,7 @@ public final class ExternalSdMountMonitor {
         }
 
         registerMediaReceiver();
+        registerUsbReceiver();
         if (bgHandler != null) {
             bgHandler.post(pollTask);
             bgHandler.post(new Runnable() {
@@ -101,6 +103,7 @@ public final class ExternalSdMountMonitor {
             bgThread = null;
         }
         unregisterMediaReceiver();
+        unregisterUsbReceiver();
     }
 
     /** True when primary storage (/storage/sdcard0) is mounted. */
@@ -140,35 +143,38 @@ public final class ExternalSdMountMonitor {
             Log.i(TAG, "Storage volume newly mounted (pri=" + priReady + ", sec=" + secReady + ", reason=" + reason + ")");
             StoragePaths.invalidate();
             notifyReady();
+        }
+
+        // 🚀 [독립 검사] 내장 메모리(sdcard0)와 외장 슬롯(sdcard1)이 모두 정상이면 추가 작업 불필요
+        boolean priNeeded = !priReady;
+        boolean secNeeded = hasSecondarySlot() && !secReady;
+
+        if (!priNeeded && !secNeeded) {
             return;
         }
 
-        // If at least one volume is ready, we are in a normal/healthy operating state.
-        if (priReady || secReady) {
-            return;
-        }
-
-        // If NO storage volume is ready at all (both sdcard0 and sdcard1 unmounted):
+        // 브로드캐스트 이벤트(배드 리무벌, USB 해제 등)인 경우 쿨다운을 무시하고 즉시 자가 치유 시도
+        boolean isBroadcastEvent = reason.startsWith("broadcast:") || reason.startsWith("usb_disconnect:");
         long now = System.currentTimeMillis();
-        if (now - lastMountAttemptMs < MOUNT_COOLDOWN_MS)
+        if (!isBroadcastEvent && (now - lastMountAttemptMs < MOUNT_COOLDOWN_MS))
             return;
         if (!mountInFlight.compareAndSet(false, true))
             return;
         lastMountAttemptMs = now;
 
         try {
-            Log.i(TAG, "No storage mounted (pri=" + priReady + ", sec=" + secReady + ", " + reason + ") — attempting emergency remount");
+            Log.i(TAG, "Storage unmounted or corrupted (pri=" + priReady + ", sec=" + secReady + ", " + reason + ") — running self-healing engine");
             boolean ok = attemptRemount();
             boolean afterPri = isPrimaryReady();
             boolean afterSec = isSecondaryReady();
-            if (ok && (afterPri || afterSec)) {
-                Log.i(TAG, "Emergency remount succeeded (pri=" + afterPri + ", sec=" + afterSec + ")");
+            if ((afterPri && !priReady) || (afterSec && !secReady)) {
+                Log.i(TAG, "Self-healing remount succeeded (pri=" + afterPri + ", sec=" + afterSec + ")");
                 StoragePaths.invalidate();
                 lastPriReady = afterPri;
                 lastSecReady = afterSec;
                 notifyReady();
             } else {
-                Log.w(TAG, "Remount did not yield a usable storage mount");
+                Log.w(TAG, "Self-healing remount completed (pri=" + afterPri + ", sec=" + afterSec + ")");
             }
         } finally {
             mountInFlight.set(false);
@@ -176,31 +182,71 @@ public final class ExternalSdMountMonitor {
     }
 
     /**
-     * Clear a wedged exFAT/FUSE stack then ask vold and kernel to mount sdcard0/sdcard1.
-     * All commands run under {@code su} with a hard timeout so the UI cannot hang.
+     * 🚀 [자가 치유 엔진]
+     * 비정상 USB 분리 등으로 dirty bit가 걸리거나 vold가 꼬였을 때,
+     * 파일시스템 점검 툴(dosfsck/fsck_msdos/fsck.vfat/fsck.exfat)로 손상을 복구하고 안전하게 재마운트합니다.
      */
     private boolean attemptRemount() {
-        // 1. If primary is missing, try vdc mount and fallback block mount
+        // 1. 내장 메모리 (/storage/sdcard0) 자가 치유 및 재마운트
         if (!isPrimaryReady()) {
+            Log.i(TAG, "Attempting self-healing repair for primary storage (sdcard0)...");
+            // 1-A: 꼬인 볼륨 핸들 강제 언마운트
+            runSuTimed("vdc volume unmount sdcard0 force 2>/dev/null");
+
+            // 1-B: 파일시스템 자동 복구 (더티 비트 해제 및 고아 클러스터 수리)
             runSuTimed(
-                    "vdc volume mount sdcard0 2>/dev/null; "
-                            + "mkdir -p /storage/sdcard0 2>/dev/null; "
-                            + "mount -t exfat -o rw /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
-                            + "mount -t vfat -o rw /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
-                            + "mount -t exfat -o rw /dev/block/mmcblk1p1 /storage/sdcard0 2>/dev/null || "
-                            + "mount -t vfat -o rw /dev/block/mmcblk1p1 /storage/sdcard0 2>/dev/null");
+                    "dosfsck -a -w /dev/block/mmcblk0p1 2>/dev/null; "
+                    + "fsck_msdos -y /dev/block/mmcblk0p1 2>/dev/null; "
+                    + "fsck.vfat -a -w /dev/block/mmcblk0p1 2>/dev/null; "
+                    + "fsck.exfat -y /dev/block/mmcblk0p1 2>/dev/null; "
+                    + "dosfsck -a -w /dev/block/mmcblk1p1 2>/dev/null; "
+                    + "fsck_msdos -y /dev/block/mmcblk1p1 2>/dev/null; "
+                    + "fsck.vfat -a -w /dev/block/mmcblk1p1 2>/dev/null; "
+                    + "fsck.exfat -y /dev/block/mmcblk1p1 2>/dev/null"
+            );
+
+            // 1-C: vold에 마운트 요청
+            runSuTimed("vdc volume mount sdcard0 2>/dev/null");
+
+            // 1-D: vold로 마운트되지 않은 경우 안드로이드 표준 권한(uid=1000/gid=1015)으로 커널 direct mount 시도
+            if (!isPrimaryReady()) {
+                runSuTimed(
+                        "mkdir -p /storage/sdcard0 2>/dev/null; "
+                        + "mount -t vfat -o rw,nosuid,nodev,noexec,uid=1000,gid=1015,fmask=0702,dmask=0702,shortname=mixed,utf8 /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
+                        + "mount -t exfat -o rw,nosuid,nodev,noexec,uid=1000,gid=1015,fmask=0702,dmask=0702 /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
+                        + "mount -t vfat -o rw /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
+                        + "mount -t exfat -o rw /dev/block/mmcblk0p1 /storage/sdcard0 2>/dev/null || "
+                        + "mount -t vfat -o rw,nosuid,nodev,noexec,uid=1000,gid=1015,fmask=0702,dmask=0702,shortname=mixed,utf8 /dev/block/mmcblk1p1 /storage/sdcard0 2>/dev/null || "
+                        + "mount -t vfat -o rw /dev/block/mmcblk1p1 /storage/sdcard0 2>/dev/null"
+                );
+            }
         }
 
-        // 2. If secondary is present and missing, remount fuse_sdcard1
+        // 2. 외장 SD카드 (/storage/sdcard1) 자가 치유 및 FUSE 재가동
         if (hasSecondarySlot() && !isSecondaryReady()) {
+            Log.i(TAG, "Attempting self-healing repair for secondary storage (sdcard1)...");
+            // 2-A: 멈춘 FUSE 및 마운트 프로세스 정리
             runSuTimed(
                     "killall -9 mount.exfat 2>/dev/null; "
-                            + "stop fuse_sdcard1 2>/dev/null; "
-                            + "sleep 1; "
-                            + "vdc volume mount sdcard1 2>/dev/null; "
-                            + "start fuse_sdcard1 2>/dev/null; "
-                            + "sleep 2; "
-                            + "getprop init.svc.fuse_sdcard1");
+                    + "stop fuse_sdcard1 2>/dev/null; "
+                    + "vdc volume unmount sdcard1 force 2>/dev/null"
+            );
+
+            // 2-B: 외장 SD카드 파일시스템 복구
+            runSuTimed(
+                    "dosfsck -a -w /dev/block/mmcblk1p1 2>/dev/null; "
+                    + "fsck_msdos -y /dev/block/mmcblk1p1 2>/dev/null; "
+                    + "fsck.vfat -a -w /dev/block/mmcblk1p1 2>/dev/null; "
+                    + "fsck.exfat -y /dev/block/mmcblk1p1 2>/dev/null"
+            );
+
+            // 2-C: vold 마운트 및 FUSE 재시작
+            runSuTimed(
+                    "vdc volume mount sdcard1 2>/dev/null; "
+                    + "start fuse_sdcard1 2>/dev/null; "
+                    + "sleep 1; "
+                    + "getprop init.svc.fuse_sdcard1"
+            );
         }
 
         return isPrimaryReady() || isSecondaryReady();
@@ -236,6 +282,8 @@ public final class ExternalSdMountMonitor {
                         || Intent.ACTION_MEDIA_REMOVED.equals(action)
                         || Intent.ACTION_MEDIA_BAD_REMOVAL.equals(action)
                         || Intent.ACTION_MEDIA_EJECT.equals(action)
+                        || Intent.ACTION_MEDIA_NOFS.equals(action)
+                        || Intent.ACTION_MEDIA_UNMOUNTABLE.equals(action)
                         || "android.intent.action.MEDIA_CHECKING".equals(action)) {
                     StoragePaths.invalidate();
                     new Thread(new Runnable() {
@@ -253,12 +301,14 @@ public final class ExternalSdMountMonitor {
         filter.addAction(Intent.ACTION_MEDIA_REMOVED);
         filter.addAction(Intent.ACTION_MEDIA_BAD_REMOVAL);
         filter.addAction(Intent.ACTION_MEDIA_EJECT);
+        filter.addAction(Intent.ACTION_MEDIA_NOFS);
+        filter.addAction(Intent.ACTION_MEDIA_UNMOUNTABLE);
         filter.addAction("android.intent.action.MEDIA_CHECKING");
         filter.addDataScheme("file");
         try {
             appContext.registerReceiver(mediaReceiver, filter);
         } catch (Exception e) {
-            Log.w(TAG, "registerReceiver failed", e);
+            Log.w(TAG, "registerMediaReceiver failed", e);
         }
     }
 
@@ -270,6 +320,58 @@ public final class ExternalSdMountMonitor {
         } catch (Exception ignored) {
         }
         mediaReceiver = null;
+    }
+
+    private void registerUsbReceiver() {
+        if (usbReceiver != null)
+            return;
+        usbReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null || intent.getAction() == null)
+                    return;
+                String action = intent.getAction();
+                boolean trigger = false;
+                if ("android.hardware.usb.action.USB_STATE".equals(action)) {
+                    boolean connected = intent.getBooleanExtra("connected", false);
+                    if (!connected) {
+                        trigger = true; // USB 케이블 분리 감지!
+                    }
+                } else if ("android.intent.action.UMS_DISCONNECTED".equals(action)) {
+                    trigger = true;
+                }
+
+                if (trigger) {
+                    Log.i(TAG, "USB disconnected event (" + action + ") — scheduling self-healing check in 500ms");
+                    if (bgHandler != null) {
+                        bgHandler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                checkAndMaybeMount("usb_disconnect:" + action);
+                            }
+                        }, 500);
+                    }
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("android.hardware.usb.action.USB_STATE");
+        filter.addAction("android.intent.action.UMS_DISCONNECTED");
+        try {
+            appContext.registerReceiver(usbReceiver, filter);
+        } catch (Exception e) {
+            Log.w(TAG, "registerUsbReceiver failed", e);
+        }
+    }
+
+    private void unregisterUsbReceiver() {
+        if (usbReceiver == null)
+            return;
+        try {
+            appContext.unregisterReceiver(usbReceiver);
+        } catch (Exception ignored) {
+        }
+        usbReceiver = null;
     }
 
     private static boolean mountsContain(String path) {

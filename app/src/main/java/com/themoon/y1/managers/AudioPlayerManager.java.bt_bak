@@ -68,30 +68,9 @@ public class AudioPlayerManager {
         if (instance == null) instance = new AudioPlayerManager();
         return instance;
     }
-    public static void ensureNativeLibs(Context context) {
-        String[] libs = { "opensles_sink", "flacJNI", "ffmpegJNI", "opusV2JNI" };
-        for (String lib : libs) {
-            try {
-                System.loadLibrary(lib);
-            } catch (Throwable t1) {
-                try {
-                    File systemLib = new File("/system/lib/lib" + lib + ".so");
-                    if (systemLib.exists()) {
-                        System.load(systemLib.getAbsolutePath());
-                    } else if (context != null) {
-                        File localLib = new File(context.getFilesDir(), "native_libs/lib" + lib + ".so");
-                        if (localLib.exists()) {
-                            System.load(localLib.getAbsolutePath());
-                        }
-                    }
-                } catch (Throwable t2) {}
-            }
-        }
-    }
 
     public void initPlayer(Context context) {
         if (exoPlayer == null) {
-            ensureNativeLibs(context);
             com.google.android.exoplayer2.DefaultRenderersFactory renderersFactory = new com.google.android.exoplayer2.DefaultRenderersFactory(context.getApplicationContext()) {
                 @Override
                 protected void buildAudioRenderers(
@@ -1302,15 +1281,16 @@ public class AudioPlayerManager {
     // 🚀 [자체 제작 6.0] FLAC 6기통 만능 채굴기 (앨범, 연도, 장르, 가사 완벽 지원)
     // =======================================================
     public Object[] extractFlacMetadata(File file) {
+        // 🚨 [치명적 버그 수리 완료] 바구니 크기를 6칸에서 8칸으로 늘려 앱 강제 종료(Crash)를 막습니다!
+        // [0]제목, [1]가수, [2]앨범, [3]연도, [4]장르, [5]앨범아트, [6]트랙번호, [7]가사
         Object[] tags = new Object[]{null, null, null, null, null, null, null, null};
-        java.io.RandomAccessFile raf = null;
         try {
-            raf = new java.io.RandomAccessFile(file, "r");
+            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r");
             byte[] header = new byte[4];
             raf.readFully(header);
 
             if (header[0] != 'f' || header[1] != 'L' || header[2] != 'a' || header[3] != 'C') {
-                return tags;
+                raf.close(); return tags;
             }
 
             boolean isLast = false;
@@ -1361,16 +1341,14 @@ public class AudioPlayerManager {
                     if (picDataLen > 0 && picDataLen < 20 * 1024 * 1024) { // 🚀 20MB까지만 허용 (메모리 폭발 방어막)
                         if (picDataLen > 2 * 1024 * 1024) { // 🚀 2MB 이상일 경우: 디스크에서 직접 리사이징하여 불러옴
                             long offset = raf.getFilePointer();
-                            java.io.FileInputStream fis = null;
                             try {
-                                fis = new java.io.FileInputStream(file);
+                                java.io.FileInputStream fis = new java.io.FileInputStream(file);
                                 fis.skip(offset);
                                 
                                 android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
                                 opts.inJustDecodeBounds = true;
                                 android.graphics.BitmapFactory.decodeStream(fis, null, opts);
                                 fis.close();
-                                fis = null;
                                 
                                 int scale = 1;
                                 while (opts.outWidth / scale > 500 || opts.outHeight / scale > 500) {
@@ -1382,6 +1360,7 @@ public class AudioPlayerManager {
                                 opts.inJustDecodeBounds = false;
                                 opts.inSampleSize = scale;
                                 android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(fis, null, opts);
+                                fis.close();
                                 
                                 if (bmp != null) {
                                     java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
@@ -1389,12 +1368,7 @@ public class AudioPlayerManager {
                                     tags[5] = baos.toByteArray();
                                     bmp.recycle();
                                 }
-                            } catch (Exception e) {
-                            } finally {
-                                if (fis != null) {
-                                    try { fis.close(); } catch (Exception ignored) {}
-                                }
-                            }
+                            } catch (Exception e) {}
                             raf.skipBytes(picDataLen);
                         } else {
                             byte[] picData = new byte[picDataLen];
@@ -1408,12 +1382,8 @@ public class AudioPlayerManager {
                     raf.skipBytes(length);
                 }
             }
-        } catch (Exception e) {
-        } finally {
-            if (raf != null) {
-                try { raf.close(); } catch (Exception ignored) {}
-            }
-        }
+            raf.close();
+        } catch (Exception e) {}
         return tags;
     }
     // =======================================================
@@ -1423,9 +1393,8 @@ public class AudioPlayerManager {
     public Object[] extractAlacMetadata(File file) {
         // 💡 [수정] null을 8개로 맞춰야 앱이 터지지 않습니다!
         Object[] tags = new Object[]{null, null, null, null, null, null, null, null};
-        java.io.RandomAccessFile raf = null;
         try {
-            raf = new java.io.RandomAccessFile(file, "r");
+            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r");
             long fileSize = raf.length();
             long pos = 0;
 
@@ -1490,12 +1459,8 @@ public class AudioPlayerManager {
                 }
                 pos += size; // 💡 현재 원자 탐색이 끝났으면 다음 원자로 훌쩍 건너뜁니다!
             }
-        } catch (Exception e) {
-        } finally {
-            if (raf != null) {
-                try { raf.close(); } catch (Exception ignored) {}
-            }
-        }
+            raf.close();
+        } catch (Exception e) {}
         return tags;
     }
 

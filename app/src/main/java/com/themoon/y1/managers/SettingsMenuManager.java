@@ -652,6 +652,30 @@ public class SettingsMenuManager {
         });
         main.containerSettingsItems.addView(btnStorageMenu);
 
+        final LinearLayout btnAutoScan = createSettingRow(t("Auto Media Scan"), main.isAutoScanEnabled ? t("ON") : t("OFF"));
+        btnAutoScan.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                main.isAutoScanEnabled = !main.isAutoScanEnabled;
+                ((TextView) btnAutoScan.getChildAt(1)).setText(main.isAutoScanEnabled ? t("ON") : t("OFF"));
+                try {
+                    main.prefs.edit().putBoolean("auto_media_scan", main.isAutoScanEnabled).commit();
+                } catch (Exception e) {}
+            }
+        });
+        main.containerSettingsItems.addView(btnAutoScan);
+
+        LinearLayout btnRescan = createSettingRow(t("Rescan Library"), "〉 ");
+        btnRescan.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                main.startMediaLibraryScan();
+            }
+        });
+        main.containerSettingsItems.addView(btnRescan);
+
         final LinearLayout btnAutoFetch = createSettingRow(t("Auto Fetch Album Art"), main.isAutoFetchEnabled ? t("ON") : t("OFF"));
         btnAutoFetch.setOnClickListener(new View.OnClickListener() {
             @Override
